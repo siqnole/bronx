@@ -1425,26 +1425,82 @@ class BronxBotDashboard {
         const list = document.getElementById('blocked-channels-list');
         if (!list) return;
         list.innerHTML = (channels || []).map(ch => `
-            <div class="list-item">
+            <div class="list-item" style="display:flex;justify-content:space-between;align-items:center;">
                 <span>#${ch.channel_id}</span>
-                <button class="btn btn-danger btn-sm" onclick="dashboard.apiCall('/guild/blocked-channels/${ch.channel_id}', { method: 'DELETE' }).then(() => dashboard.loadGuildSettingsData())">
-                    <i class="fas fa-trash"></i>
-                </button>
+                <div style="display:flex;gap:0.5rem;">
+                    <button class="btn btn-secondary btn-sm" onclick="dashboard.editBlockedChannel('${ch.channel_id}')" title="Edit">
+                        <i class="fas fa-pen"></i>
+                    </button>
+                    <button class="btn btn-danger btn-sm" onclick="dashboard.apiCall('/guild/blocked-channels/${ch.channel_id}', { method: 'DELETE' }).then(() => dashboard.loadGuildSettingsData())" title="Delete">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
             </div>
         `).join('');
+    }
+
+    editBlockedChannel(oldChannelId) {
+        this.showModal('Edit Blocked Channel', `
+            <div class="form-group">
+                <label>Channel ID</label>
+                <input type="text" id="modal-channel-id" value="${oldChannelId}" placeholder="Enter channel ID...">
+            </div>
+        `, async () => {
+            const newChannelId = document.getElementById('modal-channel-id')?.value.trim();
+            if (!newChannelId) { alert('Channel ID is required.'); return; }
+            // Delete old and add new if changed
+            if (newChannelId !== oldChannelId) {
+                await this.apiCall(`/guild/blocked-channels/${oldChannelId}`, { method: 'DELETE' });
+                await this.apiCall('/guild/blocked-channels', {
+                    method: 'POST',
+                    body: JSON.stringify({ channel_id: newChannelId })
+                });
+            }
+            this.closeModal();
+            this.loadGuildSettingsData();
+        });
     }
 
     updateCustomPrefixesList(prefixes) {
         const list = document.getElementById('custom-prefixes');
         if (!list) return;
         list.innerHTML = (prefixes || []).map(p => `
-            <div class="list-item">
+            <div class="list-item" style="display:flex;justify-content:space-between;align-items:center;">
                 <code>${p.prefix}</code>
-                <button class="btn btn-danger btn-sm" onclick="dashboard.apiCall('/guild/custom-prefixes', { method: 'DELETE', body: JSON.stringify({ prefix: '${p.prefix}' }) }).then(() => dashboard.loadGuildSettingsData())">
-                    <i class="fas fa-trash"></i>
-                </button>
+                <div style="display:flex;gap:0.5rem;">
+                    <button class="btn btn-secondary btn-sm" onclick="dashboard.editCustomPrefix('${p.prefix.replace(/'/g, "\\'")}')" title="Edit">
+                        <i class="fas fa-pen"></i>
+                    </button>
+                    <button class="btn btn-danger btn-sm" onclick="dashboard.apiCall('/guild/custom-prefixes', { method: 'DELETE', body: JSON.stringify({ prefix: '${p.prefix.replace(/'/g, "\\'") }' }) }).then(() => dashboard.loadGuildSettingsData())" title="Delete">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
             </div>
         `).join('');
+    }
+
+    editCustomPrefix(oldPrefix) {
+        this.showModal('Edit Custom Prefix', `
+            <div class="form-group">
+                <label>Prefix</label>
+                <input type="text" id="modal-prefix" value="${oldPrefix}" placeholder="Enter prefix...">
+            </div>
+        `, async () => {
+            const newPrefix = document.getElementById('modal-prefix')?.value.trim();
+            if (!newPrefix) { alert('Prefix is required.'); return; }
+            if (newPrefix !== oldPrefix) {
+                await this.apiCall('/guild/custom-prefixes', {
+                    method: 'DELETE',
+                    body: JSON.stringify({ prefix: oldPrefix })
+                });
+                await this.apiCall('/guild/custom-prefixes', {
+                    method: 'POST',
+                    body: JSON.stringify({ prefix: newPrefix })
+                });
+            }
+            this.closeModal();
+            this.loadGuildSettingsData();
+        });
     }
 
     updateCommandsList(commands) {
@@ -1510,22 +1566,159 @@ class BronxBotDashboard {
         const table = document.getElementById('shop-items-tbody');
         if (!table || !items) return;
         table.innerHTML = items.map(item => `
-            <tr>
+            <tr data-item-id="${item.item_id}" onclick="dashboard.editShopItem('${item.item_id}')" style="cursor:pointer;">
                 <td>${item.item_id}</td>
-                <td>${item.name}</td>
-                <td>${item.category}</td>
-                <td>$${Number(item.price).toLocaleString()}</td>
-                <td>${item.level || 1}</td>
+                <td class="shop-item-name">${item.name}</td>
+                <td class="shop-item-category">${item.category}</td>
+                <td class="shop-item-price">$${Number(item.price).toLocaleString()}</td>
+                <td class="shop-item-level">${item.level || 1}</td>
+                <td class="shop-item-desc" style="display:none;">${item.description || ''}</td>
+                <td class="shop-item-maxqty" style="display:none;">${item.max_quantity || 1}</td>
+                <td style="text-align:right;">
+                    <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); dashboard.editShopItem('${item.item_id}')" title="Edit">
+                        <i class="fas fa-pen"></i>
+                    </button>
+                    <button class="btn btn-danger btn-sm" onclick="event.stopPropagation(); dashboard.deleteShopItem('${item.item_id}')" title="Delete">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </td>
             </tr>
         `).join('');
+    }
+
+    editShopItem(itemId) {
+        const row = document.querySelector(`tr[data-item-id="${itemId}"]`);
+        if (!row) return;
+        const name = row.querySelector('.shop-item-name')?.textContent || '';
+        const category = row.querySelector('.shop-item-category')?.textContent || 'other';
+        const priceText = row.querySelector('.shop-item-price')?.textContent || '0';
+        const price = parseInt(priceText.replace(/[^0-9]/g, '')) || 0;
+        const level = row.querySelector('.shop-item-level')?.textContent || '1';
+        const description = row.querySelector('.shop-item-desc')?.textContent || '';
+        const maxQty = row.querySelector('.shop-item-maxqty')?.textContent || '1';
+
+        this.showModal(`Edit Shop Item: ${itemId}`, `
+            <div class="form-group">
+                <label>Item ID <span style="color:var(--text-muted);font-size:0.75rem;">(read-only)</span></label>
+                <input type="text" value="${itemId}" disabled style="opacity:0.6;">
+            </div>
+            <div class="form-group">
+                <label>Item Name</label>
+                <input type="text" id="modal-item-name" value="${name}">
+            </div>
+            <div class="form-group">
+                <label>Description</label>
+                <textarea id="modal-item-description" rows="2">${description}</textarea>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Category</label>
+                    <select id="modal-item-category">
+                        <option value="potion" ${category === 'potion' ? 'selected' : ''}>Potion</option>
+                        <option value="upgrade" ${category === 'upgrade' ? 'selected' : ''}>Upgrade</option>
+                        <option value="rod" ${category === 'rod' ? 'selected' : ''}>Fishing Rod</option>
+                        <option value="bait" ${category === 'bait' ? 'selected' : ''}>Bait</option>
+                        <option value="collectible" ${category === 'collectible' ? 'selected' : ''}>Collectible</option>
+                        <option value="other" ${category === 'other' ? 'selected' : ''}>Other</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Price</label>
+                    <input type="number" id="modal-item-price" min="1" value="${price}">
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Level</label>
+                    <input type="number" id="modal-item-level" min="1" value="${level}">
+                </div>
+                <div class="form-group">
+                    <label>Max Quantity</label>
+                    <input type="number" id="modal-item-maxqty" min="1" value="${maxQty}">
+                </div>
+            </div>
+        `, async () => {
+            const newName = document.getElementById('modal-item-name')?.value.trim();
+            const newDescription = document.getElementById('modal-item-description')?.value.trim();
+            const newCategory = document.getElementById('modal-item-category')?.value;
+            const newPrice = parseInt(document.getElementById('modal-item-price')?.value);
+            const newLevel = parseInt(document.getElementById('modal-item-level')?.value) || 1;
+            const newMaxQty = parseInt(document.getElementById('modal-item-maxqty')?.value) || 1;
+            if (!newName || !newPrice) { alert('Name and Price are required.'); return; }
+            await this.apiCall(`/shop/items/${encodeURIComponent(itemId)}`, {
+                method: 'PUT',
+                body: JSON.stringify({ name: newName, description: newDescription, category: newCategory, price: newPrice, level: newLevel, max_quantity: newMaxQty })
+            });
+            this.closeModal();
+            this.loadShopData();
+        });
+    }
+
+    async deleteShopItem(itemId) {
+        if (!confirm(`Delete shop item "${itemId}"?`)) return;
+        await this.apiCall(`/shop/items/${encodeURIComponent(itemId)}`, { method: 'DELETE' });
+        this.loadShopData();
     }
 
     updateDailyDealsList(deals) {
         const list = document.querySelector('.daily-deals-list');
         if (!list || !deals) return;
+        if (!deals.length) {
+            list.innerHTML = '<div style="color:var(--text-secondary);font-size:0.85rem;">No daily deals configured</div>';
+            return;
+        }
         list.innerHTML = deals.map(d => `
-            <div class="deal-item"><span>${d.item_id}</span><span>${d.discount}% off</span></div>
+            <div class="deal-card" data-deal-id="${d.id || d.item_id}" onclick="dashboard.editDailyDeal('${d.id || d.item_id}', '${d.item_id}', ${d.discount}, ${d.stock || 'null'})" style="display:flex;justify-content:space-between;align-items:center;padding:0.5rem;cursor:pointer;">
+                <div class="deal-info">
+                    <span class="deal-item-id">${d.item_id}</span>
+                    <span class="deal-discount" style="margin-left:0.5rem;color:var(--accent);font-weight:600;">${d.discount}% off</span>
+                    ${d.stock ? `<span class="deal-stock" style="margin-left:0.5rem;color:var(--text-secondary);font-size:0.8rem;">Stock: ${d.stock}</span>` : '<span class="deal-stock" style="display:none;"></span>'}
+                </div>
+                <div style="display:flex;gap:0.5rem;">
+                    <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); dashboard.editDailyDeal('${d.id || d.item_id}', '${d.item_id}', ${d.discount}, ${d.stock || 'null'})" title="Edit">
+                        <i class="fas fa-pen"></i>
+                    </button>
+                    <button class="btn btn-danger btn-sm" onclick="event.stopPropagation(); dashboard.deleteDailyDeal('${d.id || d.item_id}')" title="Delete">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+            </div>
         `).join('');
+    }
+
+    editDailyDeal(id, itemId, discount, stock) {
+        this.showModal('Edit Daily Deal', `
+            <div class="form-group">
+                <label>Item ID</label>
+                <input type="text" id="modal-deal-item" value="${itemId}" placeholder="Item ID...">
+            </div>
+            <div class="form-group">
+                <label>Discount (%)</label>
+                <input type="number" id="modal-deal-discount" min="1" max="99" value="${discount}">
+            </div>
+            <div class="form-group">
+                <label>Stock (optional)</label>
+                <input type="number" id="modal-deal-stock" min="1" value="${stock || ''}" placeholder="Leave empty for unlimited">
+            </div>
+        `, async () => {
+            const newItemId = document.getElementById('modal-deal-item')?.value.trim();
+            const newDiscount = parseInt(document.getElementById('modal-deal-discount')?.value);
+            const stockVal = document.getElementById('modal-deal-stock')?.value;
+            const newStock = stockVal ? parseInt(stockVal) : null;
+            if (!newItemId || !newDiscount) { alert('Item ID and Discount are required.'); return; }
+            await this.apiCall(`/shop/daily-deals/${encodeURIComponent(id)}`, {
+                method: 'PUT',
+                body: JSON.stringify({ item_id: newItemId, discount: newDiscount, stock: newStock })
+            });
+            this.closeModal();
+            this.loadShopData();
+        });
+    }
+
+    async deleteDailyDeal(id) {
+        if (!confirm('Delete this daily deal?')) return;
+        await this.apiCall(`/shop/daily-deals/${encodeURIComponent(id)}`, { method: 'DELETE' });
+        this.loadShopData();
     }
 
     updateBazaarStats(stats) {
@@ -1557,13 +1750,48 @@ class BronxBotDashboard {
         }
         const entries = Array.isArray(settings) ? settings : Object.entries(settings).map(([k, v]) => ({ key: k, value: v }));
         el.innerHTML = entries.map(s => `
-            <div class="list-item" style="display:flex;justify-content:space-between;align-items:center;">
-                <div><code style="color:var(--accent);">${s.key}</code> <span style="margin-left:0.5rem;">${s.value}</span></div>
-                <button class="btn btn-danger btn-sm" onclick="dashboard.apiCall('/ml/settings/${encodeURIComponent(s.key)}', { method: 'DELETE' }).then(() => dashboard.loadMLSettingsData())">
-                    <i class="fas fa-trash"></i>
-                </button>
+            <div class="ml-setting-card" data-ml-key="${s.key}" onclick="dashboard.editMLSetting('${s.key}', '${String(s.value).replace(/'/g, "\\'")}')" style="display:flex;justify-content:space-between;align-items:center;padding:0.5rem;cursor:pointer;">
+                <div class="ml-setting-info">
+                    <code class="ml-key" style="color:var(--accent);">${s.key}</code>
+                    <span class="ml-value" style="margin-left:0.5rem;">${s.value}</span>
+                </div>
+                <div style="display:flex;gap:0.5rem;">
+                    <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); dashboard.editMLSetting('${s.key}', '${String(s.value).replace(/'/g, "\\'")}')" title="Edit">
+                        <i class="fas fa-pen"></i>
+                    </button>
+                    <button class="btn btn-danger btn-sm" onclick="event.stopPropagation(); dashboard.apiCall('/ml/settings/${encodeURIComponent(s.key)}', { method: 'DELETE' }).then(() => dashboard.loadMLSettingsData())" title="Delete">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
             </div>
         `).join('');
+    }
+
+    editMLSetting(key, value) {
+        this.showModal('Edit ML Setting', `
+            <div class="form-group">
+                <label>Setting Key</label>
+                <input type="text" id="modal-ml-key" value="${key}" placeholder="e.g. learning_rate">
+            </div>
+            <div class="form-group">
+                <label>Value</label>
+                <input type="text" id="modal-ml-value" value="${value}" placeholder="e.g. 0.01">
+            </div>
+        `, async () => {
+            const newKey = document.getElementById('modal-ml-key')?.value.trim();
+            const newValue = document.getElementById('modal-ml-value')?.value.trim();
+            if (!newKey || !newValue) { alert('Both fields are required.'); return; }
+            // If key changed, delete old and create new
+            if (newKey !== key) {
+                await this.apiCall(`/ml/settings/${encodeURIComponent(key)}`, { method: 'DELETE' });
+            }
+            await this.apiCall('/ml/settings', {
+                method: 'POST',
+                body: JSON.stringify({ key: newKey, value: newValue })
+            });
+            this.closeModal();
+            this.loadMLSettingsData();
+        });
     }
 
     async loadUsersData() {
@@ -1739,15 +1967,77 @@ class BronxBotDashboard {
         if (!list) return;
         if (!data || !data.length) { list.innerHTML = '<div style="color:var(--text-secondary);">No active giveaways</div>'; return; }
         list.innerHTML = data.map(g => `
-            <div class="list-item" style="display:flex;justify-content:space-between;align-items:center;">
-                <div>
-                    <strong>$${Number(g.prize).toLocaleString()}</strong>
-                    <span style="margin-left:0.5rem;color:var(--text-secondary);">${g.winner_count || 1} winner(s)</span>
-                    <span style="margin-left:0.5rem;color:var(--text-secondary);font-size:0.8rem;">Ends: ${new Date(g.ends_at).toLocaleString()}</span>
+            <div class="giveaway-card" data-giveaway-id="${g.id}" onclick="dashboard.editGiveaway(${g.id}, ${g.prize}, ${g.winner_count || 1}, '${g.ends_at}', '${g.channel_id || ''}')" style="display:flex;justify-content:space-between;align-items:center;padding:0.75rem;cursor:pointer;border-radius:0.5rem;background:var(--bg-tertiary);margin-bottom:0.5rem;">
+                <div class="giveaway-info">
+                    <strong class="giveaway-prize">$${Number(g.prize).toLocaleString()}</strong>
+                    <span class="giveaway-winners" style="margin-left:0.5rem;color:var(--text-secondary);">${g.winner_count || 1} winner(s)</span>
+                    <span class="giveaway-channel" style="margin-left:0.5rem;color:var(--text-muted);font-size:0.75rem;">${g.channel_id ? 'Channel: ' + g.channel_id : ''}</span>
+                    <span class="giveaway-ends" style="margin-left:0.5rem;color:var(--text-secondary);font-size:0.8rem;">Ends: ${new Date(g.ends_at).toLocaleString()}</span>
                 </div>
-                <span class="badge">${g.participants || 0} entries</span>
+                <div style="display:flex;align-items:center;gap:0.75rem;">
+                    <span class="badge">${g.participants || 0} entries</span>
+                    <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); dashboard.editGiveaway(${g.id}, ${g.prize}, ${g.winner_count || 1}, '${g.ends_at}', '${g.channel_id || ''}')" title="Edit">
+                        <i class="fas fa-pen"></i>
+                    </button>
+                    <button class="btn btn-warning btn-sm" onclick="event.stopPropagation(); dashboard.endGiveaway(${g.id})" title="End Early">
+                        <i class="fas fa-stop"></i>
+                    </button>
+                    <button class="btn btn-danger btn-sm" onclick="event.stopPropagation(); dashboard.cancelGiveaway(${g.id})" title="Cancel">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
             </div>
         `).join('');
+    }
+
+    editGiveaway(id, prize, winnerCount, endsAt, channelId) {
+        const endDate = new Date(endsAt);
+        const endDateStr = endDate.toISOString().slice(0, 16); // Format for datetime-local input
+        
+        this.showModal('Edit Giveaway', `
+            <div class="form-group">
+                <label>Prize Amount</label>
+                <input type="number" id="modal-giveaway-prize" min="1" value="${prize}">
+            </div>
+            <div class="form-group">
+                <label>Number of Winners</label>
+                <input type="number" id="modal-giveaway-winners" min="1" value="${winnerCount}">
+            </div>
+            <div class="form-group">
+                <label>End Date & Time</label>
+                <input type="datetime-local" id="modal-giveaway-ends" value="${endDateStr}">
+            </div>
+            <div class="form-group">
+                <label>Channel ID</label>
+                <input type="text" id="modal-giveaway-channel" value="${channelId}" placeholder="Channel ID...">
+            </div>
+        `, async () => {
+            const newPrize = parseInt(document.getElementById('modal-giveaway-prize')?.value);
+            const newWinners = parseInt(document.getElementById('modal-giveaway-winners')?.value) || 1;
+            const newEndsAt = document.getElementById('modal-giveaway-ends')?.value;
+            const newChannelId = document.getElementById('modal-giveaway-channel')?.value.trim();
+            if (!newPrize || !newEndsAt) { alert('Prize and end date are required.'); return; }
+            await this.apiCall(`/giveaways/${id}`, {
+                method: 'PUT',
+                body: JSON.stringify({ prize: newPrize, max_winners: newWinners, ends_at: new Date(newEndsAt).toISOString(), channel_id: newChannelId })
+            });
+            this.closeModal();
+            this.loadGiveawaysData();
+        });
+    }
+
+    async endGiveaway(id) {
+        if (!confirm('End this giveaway early and pick winners now?')) return;
+        await this.apiCall(`/giveaways/${id}/end`, { method: 'POST' });
+        this.showNotification('Giveaway ended!', 'success');
+        this.loadGiveawaysData();
+    }
+
+    async cancelGiveaway(id) {
+        if (!confirm('Cancel this giveaway? This cannot be undone.')) return;
+        await this.apiCall(`/giveaways/${id}`, { method: 'DELETE' });
+        this.showNotification('Giveaway cancelled.', 'info');
+        this.loadGiveawaysData();
     }
 
     async loadModerationData() {
@@ -1827,17 +2117,59 @@ class BronxBotDashboard {
         if (!list) return;
         if (!roles || !roles.length) { list.innerHTML = '<div style="color:var(--text-secondary);">No reaction roles configured</div>'; return; }
         list.innerHTML = roles.map(r => `
-            <div class="list-item" style="display:flex;justify-content:space-between;align-items:center;">
-                <div>
-                    <span>${r.emoji}</span>
-                    <span style="margin-left:0.5rem;">Message: ${r.message_id}</span>
-                    <span style="margin-left:0.5rem;color:var(--text-secondary);">→ Role: ${r.role_id}</span>
+            <div class="reaction-role-card" data-rr-id="${r.id || r.message_id}" onclick="dashboard.editReactionRole('${r.id || r.message_id}', '${r.message_id}', '${r.channel_id || ''}', '${r.emoji_raw}', '${r.role_id}')">
+                <div class="reaction-role-info">
+                    <span class="rr-emoji">${r.emoji_raw}</span>
+                    <span class="rr-message" style="margin-left:0.5rem;">Message: ${r.message_id}</span>
+                    <span class="rr-channel" style="margin-left:0.5rem;color:var(--text-muted);font-size:0.8rem;">${r.channel_id ? 'Channel: ' + r.channel_id : ''}</span>
+                    <span class="rr-role" style="margin-left:0.5rem;color:var(--text-secondary);">→ Role: ${r.role_id}</span>
                 </div>
-                <button class="btn btn-danger btn-sm" onclick="dashboard.apiCall('/reaction-roles/${r.id || r.message_id}', { method: 'DELETE' }).then(() => dashboard.loadReactionRolesData())">
-                    <i class="fas fa-trash"></i>
-                </button>
+                <div style="display:flex;gap:0.5rem;">
+                    <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); dashboard.editReactionRole('${r.id || r.message_id}', '${r.message_id}', '${r.channel_id || ''}', '${r.emoji_raw}', '${r.role_id}')" title="Edit">
+                        <i class="fas fa-pen"></i>
+                    </button>
+                    <button class="btn btn-danger btn-sm" onclick="event.stopPropagation(); dashboard.apiCall('/reaction-roles/${r.id || r.message_id}', { method: 'DELETE' }).then(() => dashboard.loadReactionRolesData())" title="Delete">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
             </div>
         `).join('');
+    }
+
+    editReactionRole(id, messageId, channelId, emoji, roleId) {
+        this.showModal('Edit Reaction Role', `
+            <div class="form-group">
+                <label>Message ID</label>
+                <input type="text" id="modal-rr-message" value="${messageId}" placeholder="Message ID...">
+            </div>
+            <div class="form-group">
+                <label>Channel ID</label>
+                <input type="text" id="modal-rr-channel" value="${channelId}" placeholder="Channel ID...">
+            </div>
+            <div class="form-group">
+                <label>Emoji</label>
+                <input type="text" id="modal-rr-emoji" value="${emoji}" placeholder="Emoji (e.g. 🎉 or custom emoji ID)">
+            </div>
+            <div class="form-group">
+                <label>Role ID</label>
+                <input type="text" id="modal-rr-role" value="${roleId}" placeholder="Role ID...">
+            </div>
+        `, async () => {
+            const newMessageId = document.getElementById('modal-rr-message')?.value.trim();
+            const newChannelId = document.getElementById('modal-rr-channel')?.value.trim();
+            const newEmoji = document.getElementById('modal-rr-emoji')?.value.trim();
+            const newRoleId = document.getElementById('modal-rr-role')?.value.trim();
+            if (!newMessageId || !newChannelId || !newEmoji || !newRoleId) {
+                alert('All fields are required.');
+                return;
+            }
+            await this.apiCall(`/reaction-roles/${id}`, {
+                method: 'PUT',
+                body: JSON.stringify({ message_id: newMessageId, channel_id: newChannelId, emoji_raw: newEmoji, role_id: newRoleId })
+            });
+            this.closeModal();
+            this.loadReactionRolesData();
+        });
     }
 
     // ── Scope Rules ──
@@ -2090,7 +2422,7 @@ class BronxBotDashboard {
         }
         this.apiCall('/reaction-roles', {
             method: 'POST',
-            body: JSON.stringify({ message_id, channel_id, emoji, role_id })
+            body: JSON.stringify({ message_id, channel_id, emoji_raw: emoji, role_id })
         }).then(res => {
             if (res) {
                 this.showNotification('Reaction role added!', 'success');
