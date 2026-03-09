@@ -386,3 +386,33 @@ document.querySelectorAll('.feature-card, .category, .stat-item').forEach(el => 
     el.style.transition = 'opacity 0.6s ease, transform 0.6s ease';
     observer.observe(el);
 });
+
+// Check authentication status and update login button
+async function checkAuthAndUpdateButton() {
+    try {
+        const response = await fetch('/api/auth/user', {
+            credentials: 'include'
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            const loginBtn = document.getElementById('login-btn');
+            
+            if (data.authenticated && loginBtn) {
+                // User is logged in, change button to dashboard
+                loginBtn.textContent = 'dashboard';
+                loginBtn.href = '/dashboard.html';
+                loginBtn.classList.remove('btn-secondary');
+                loginBtn.classList.add('btn-primary');
+            }
+        }
+    } catch (error) {
+        // Authentication check failed, keep default "log in" button
+        console.log('Auth check failed, keeping default button');
+    }
+}
+
+// Initialize on page load
+document.addEventListener('DOMContentLoaded', function() {
+    checkAuthAndUpdateButton();
+});
