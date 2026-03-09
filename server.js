@@ -765,27 +765,22 @@ app.get('/api/stats/overview', async (req, res) => {
         let commandsToday = [{ count: 0 }];
         let fishToday = [{ count: 0 }];
 
-        // Economy — sum wallet + bank from users table directly
+        // Economy — sum wallet + bank scoped to users active in this guild
         try {
             const [ev] = await db.execute(
-                'SELECT COALESCE(SUM(wallet + bank), 0) as total FROM users'
+                'SELECT COALESCE(SUM(u.wallet + u.bank), 0) as total FROM users u WHERE u.user_id IN (SELECT DISTINCT user_id FROM command_stats WHERE guild_id = ?)',
+                [guildId]
             );
             economyValue = ev;
         } catch (e) { console.warn('economy value query failed:', e.message); }
 
-        // Commands today — guild-scoped first, global fallback
+        // Commands today — guild-scoped only
         try {
             const [guildCmds] = await db.execute(
                 'SELECT COUNT(*) as count FROM command_stats WHERE guild_id = ? AND used_at >= CURDATE()',
                 [guildId]
             );
-            if (guildCmds[0].count > 0) {
-                commandsToday = guildCmds;
-            } else {
-                [commandsToday] = await db.execute(
-                    'SELECT COUNT(*) as count FROM command_stats WHERE used_at >= CURDATE()'
-                );
-            }
+            commandsToday = guildCmds;
         } catch (e) { console.warn('commands today query failed:', e.message); }
 
         // Fish caught today — guild-scoped first, global fallback
@@ -805,7 +800,7 @@ app.get('/api/stats/overview', async (req, res) => {
 
         res.json({
             memberCount,                                    // from Discord API (this server only)
-            totalEconomyValue: economyValue[0].total || 0, // all servers (bot DB global)
+            totalEconomyValue: economyValue[0].total || 0, // scoped to selected guild
             commandsToday: commandsToday[0].count,         // all servers / global fallback
             fishCaughtToday: fishToday[0].count            // all servers / global fallback
         });
@@ -1834,25 +1829,19 @@ async function getRealtimeStats() {
 // it's fetched on the HTTP /api/stats/overview request instead.
 async function getGuildRealtimeStats(guildId) {
     try {
-        // Economy — sum wallet + bank from users table directly
+        // Economy — sum wallet + bank scoped to users active in this guild
         const [[economyValue]] = await db.execute(
-            'SELECT COALESCE(SUM(wallet + bank), 0) as total FROM users'
+            'SELECT COALESCE(SUM(u.wallet + u.bank), 0) as total FROM users u WHERE u.user_id IN (SELECT DISTINCT user_id FROM command_stats WHERE guild_id = ?)',
+            [guildId]
         );
 
-        // Commands today — guild-scoped with global fallback
+        // Commands today — guild-scoped only
         let commandsToday = { count: 0 };
         const [[guildCmds]] = await db.execute(
             'SELECT COUNT(*) as count FROM command_stats WHERE guild_id = ? AND used_at >= CURDATE()',
             [guildId]
         );
-        if (guildCmds.count > 0) {
-            commandsToday = guildCmds;
-        } else {
-            const [[globalCmds]] = await db.execute(
-                'SELECT COUNT(*) as count FROM command_stats WHERE used_at >= CURDATE()'
-            );
-            commandsToday = globalCmds;
-        }
+        commandsToday = guildCmds;
 
         // Fish caught today — guild-scoped with global fallback
         let fishToday = { count: 0 };
