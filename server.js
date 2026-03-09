@@ -169,6 +169,23 @@ async function initDatabase() {
             user_id VARCHAR(32) NOT NULL,
             UNIQUE KEY uq_entry (giveaway_id, user_id)
         )`);
+        await db.execute(`CREATE TABLE IF NOT EXISTS command_stats (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            user_id VARCHAR(32) NOT NULL,
+            guild_id VARCHAR(32) NOT NULL DEFAULT 'global',
+            command_name VARCHAR(64) NOT NULL,
+            used_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            INDEX idx_guild_used (guild_id, used_at),
+            INDEX idx_user (user_id)
+        )`);
+        await db.execute(`CREATE TABLE IF NOT EXISTS fish_catches (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            user_id VARCHAR(32) NOT NULL,
+            guild_id VARCHAR(32) NOT NULL DEFAULT 'global',
+            fish_name VARCHAR(64) DEFAULT NULL,
+            caught_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            INDEX idx_guild_caught (guild_id, caught_at)
+        )`);
 
         // Migrations: add reason column to blacklist/whitelist if missing
         try {
@@ -176,6 +193,13 @@ async function initDatabase() {
         } catch (e) { /* column already exists */ }
         try {
             await db.execute('ALTER TABLE global_whitelist ADD COLUMN reason TEXT DEFAULT NULL');
+        } catch (e) { /* column already exists */ }
+        // Migrations: add guild_id column to command_stats / fish_catches if missing
+        try {
+            await db.execute("ALTER TABLE command_stats ADD COLUMN guild_id VARCHAR(32) NOT NULL DEFAULT 'global'");
+        } catch (e) { /* column already exists */ }
+        try {
+            await db.execute("ALTER TABLE fish_catches ADD COLUMN guild_id VARCHAR(32) NOT NULL DEFAULT 'global'");
         } catch (e) { /* column already exists */ }
 
         console.log('Dashboard tables verified/created');
@@ -723,32 +747,46 @@ app.get('/api/stats/overview', async (req, res) => {
         }
 
         // Count distinct users who have used commands in this guild
-        const [userCount] = await db.execute(
-            'SELECT COUNT(DISTINCT user_id) as count FROM command_stats WHERE guild_id = ?',
-            [guildId]
-        );
-        
-        // Get economy value for users active in this guild
-        const [economyValue] = await db.execute(`
-            SELECT COALESCE(SUM(u.wallet + u.bank), 0) as total 
-            FROM users u
-            WHERE u.user_id IN (
-                SELECT DISTINCT user_id FROM command_stats WHERE guild_id = ?
-            )`,
-            [guildId]
-        );
-        
-        // Commands today in this guild
-        const [commandsToday] = await db.execute(
-            'SELECT COUNT(*) as count FROM command_stats WHERE guild_id = ? AND used_at >= CURDATE()',
-            [guildId]
-        );
-        
-        // Fish caught today in this guild
-        const [fishToday] = await db.execute(
-            'SELECT COUNT(*) as count FROM fish_catches WHERE guild_id = ? AND caught_at >= CURDATE()',
-            [guildId]
-        );
+        let userCount = [{ count: 0 }];
+        let economyValue = [{ total: 0 }];
+        let commandsToday = [{ count: 0 }];
+        let fishToday = [{ count: 0 }];
+
+        try {
+            [userCount] = await db.execute(
+                'SELECT COUNT(DISTINCT user_id) as count FROM command_stats WHERE guild_id = ?',
+                [guildId]
+            );
+        } catch (e) { console.warn('command_stats query failed:', e.message); }
+
+        try {
+            // Get economy value for users active in this guild
+            const [ev] = await db.execute(`
+                SELECT COALESCE(SUM(u.wallet + u.bank), 0) as total 
+                FROM users u
+                WHERE u.user_id IN (
+                    SELECT DISTINCT user_id FROM command_stats WHERE guild_id = ?
+                )`,
+                [guildId]
+            );
+            economyValue = ev;
+        } catch (e) { console.warn('economy value query failed:', e.message); }
+
+        try {
+            // Commands today in this guild
+            [commandsToday] = await db.execute(
+                'SELECT COUNT(*) as count FROM command_stats WHERE guild_id = ? AND used_at >= CURDATE()',
+                [guildId]
+            );
+        } catch (e) { console.warn('commands today query failed:', e.message); }
+
+        try {
+            // Fish caught today in this guild
+            [fishToday] = await db.execute(
+                'SELECT COUNT(*) as count FROM fish_catches WHERE guild_id = ? AND caught_at >= CURDATE()',
+                [guildId]
+            );
+        } catch (e) { console.warn('fish today query failed:', e.message); }
 
         res.json({
             totalUsers: userCount[0].count,
@@ -773,26 +811,33 @@ app.get('/api/stats/recent-activity', async (req, res) => {
         }
 
         // Get recent command activity for this guild
-        const [commandActivity] = await db.execute(`
-            SELECT 'terminal' as icon, 
-                   CONCAT('Command used: ', command_name) as description, 
-                   used_at as time
-            FROM command_stats 
-            WHERE guild_id = ? AND used_at >= DATE_SUB(NOW(), INTERVAL 2 HOUR)
-            ORDER BY used_at DESC
-            LIMIT 3
-        `, [guildId]);
+        let commandActivity = [];
+        let fishActivity = [];
 
-        // Get recent fish catches for this guild
-        const [fishActivity] = await db.execute(`
-            SELECT 'fish' as icon,
-                   CONCAT('Fish caught: ', COALESCE(fish_name, 'Unknown')) as description,
-                   caught_at as time
-            FROM fish_catches
-            WHERE guild_id = ? AND caught_at >= DATE_SUB(NOW(), INTERVAL 2 HOUR)
-            ORDER BY caught_at DESC
-            LIMIT 2
-        `, [guildId]);
+        try {
+            [commandActivity] = await db.execute(`
+                SELECT 'terminal' as icon, 
+                       CONCAT('Command used: ', command_name) as description, 
+                       used_at as time
+                FROM command_stats 
+                WHERE guild_id = ? AND used_at >= DATE_SUB(NOW(), INTERVAL 2 HOUR)
+                ORDER BY used_at DESC
+                LIMIT 3
+            `, [guildId]);
+        } catch (e) { console.warn('command activity query failed:', e.message); }
+
+        try {
+            // Get recent fish catches for this guild
+            [fishActivity] = await db.execute(`
+                SELECT 'fish' as icon,
+                       CONCAT('Fish caught: ', COALESCE(fish_name, 'Unknown')) as description,
+                       caught_at as time
+                FROM fish_catches
+                WHERE guild_id = ? AND caught_at >= DATE_SUB(NOW(), INTERVAL 2 HOUR)
+                ORDER BY caught_at DESC
+                LIMIT 2
+            `, [guildId]);
+        } catch (e) { console.warn('fish activity query failed:', e.message); }
 
         // Combine and sort by time
         const allActivities = [...commandActivity, ...fishActivity]
