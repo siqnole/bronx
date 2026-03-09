@@ -760,49 +760,43 @@ app.get('/api/stats/overview', async (req, res) => {
             }
         }
 
-        // --- Global stats from bot DB (not yet guild-scoped) ---
+        // --- Per-guild stats from server-specific tables ---
         let economyValue = [{ total: 0 }];
         let commandsToday = [{ count: 0 }];
         let fishToday = [{ count: 0 }];
 
-        // Economy — sum wallet + bank scoped to users active in this guild
+        // Economy — sum wallet + bank from server_users (per-guild balances)
         try {
             const [ev] = await db.execute(
-                'SELECT COALESCE(SUM(u.wallet + u.bank), 0) as total FROM users u WHERE u.user_id IN (SELECT DISTINCT user_id FROM command_stats WHERE guild_id = ?)',
+                'SELECT COALESCE(SUM(wallet + bank), 0) as total FROM server_users WHERE guild_id = ?',
                 [guildId]
             );
             economyValue = ev;
         } catch (e) { console.warn('economy value query failed:', e.message); }
 
-        // Commands today — guild-scoped only
+        // Commands today — from server_command_stats (per-guild)
         try {
             const [guildCmds] = await db.execute(
-                'SELECT COUNT(*) as count FROM command_stats WHERE guild_id = ? AND used_at >= CURDATE()',
+                'SELECT COUNT(*) as count FROM server_command_stats WHERE guild_id = ? AND used_at >= CURDATE()',
                 [guildId]
             );
             commandsToday = guildCmds;
         } catch (e) { console.warn('commands today query failed:', e.message); }
 
-        // Fish caught today — guild-scoped first, global fallback
+        // Fish caught today — from server_fish_catches (per-guild)
         try {
             const [guildFish] = await db.execute(
-                'SELECT COUNT(*) as count FROM fish_catches WHERE guild_id = ? AND caught_at >= CURDATE()',
+                'SELECT COUNT(*) as count FROM server_fish_catches WHERE guild_id = ? AND caught_at >= CURDATE()',
                 [guildId]
             );
-            if (guildFish[0].count > 0) {
-                fishToday = guildFish;
-            } else {
-                [fishToday] = await db.execute(
-                    'SELECT COUNT(*) as count FROM fish_catches WHERE caught_at >= CURDATE()'
-                );
-            }
+            fishToday = guildFish;
         } catch (e) { console.warn('fish today query failed:', e.message); }
 
         res.json({
             memberCount,                                    // from Discord API (this server only)
-            totalEconomyValue: economyValue[0].total || 0, // scoped to selected guild
-            commandsToday: commandsToday[0].count,         // all servers / global fallback
-            fishCaughtToday: fishToday[0].count            // all servers / global fallback
+            totalEconomyValue: economyValue[0].total || 0, // from server_users (per-guild)
+            commandsToday: commandsToday[0].count,         // from server_command_stats (per-guild)
+            fishCaughtToday: fishToday[0].count            // from server_fish_catches (per-guild)
         });
     } catch (error) {
         console.error('Overview stats error:', error);
@@ -1359,20 +1353,25 @@ app.get('/api/users/search', async (req, res) => {
         let params = [];
 
         if (/^\d+$/.test(q)) {
-            // Numeric search - search by user ID (must have activity in this guild)
+            // Numeric search - search by user ID in server_users
             query = `
-                SELECT u.* FROM users u
-                WHERE u.user_id = ? 
-                AND u.user_id IN (SELECT DISTINCT user_id FROM command_stats WHERE guild_id = ?)
+                SELECT su.guild_id, su.user_id, su.wallet, su.bank, su.bank_limit,
+                       su.total_gambled, su.total_won, su.total_lost, su.commands_used,
+                       su.created_at, su.last_active
+                FROM server_users su
+                WHERE su.user_id = ? AND su.guild_id = ?
             `;
             params = [q, guildId];
         } else {
-            // Text search - find users active in this guild by economy values
+            // Text search - find users in this guild by economy values
             query = `
-                SELECT u.* FROM users u
-                WHERE u.user_id IN (SELECT DISTINCT user_id FROM command_stats WHERE guild_id = ?)
-                AND (u.user_id LIKE ? OR (u.wallet + u.bank) > 10000)
-                ORDER BY (u.wallet + u.bank) DESC 
+                SELECT su.guild_id, su.user_id, su.wallet, su.bank, su.bank_limit,
+                       su.total_gambled, su.total_won, su.total_lost, su.commands_used,
+                       su.created_at, su.last_active
+                FROM server_users su
+                WHERE su.guild_id = ?
+                AND (su.user_id LIKE ? OR (su.wallet + su.bank) > 10000)
+                ORDER BY (su.wallet + su.bank) DESC 
                 LIMIT 20
             `;
             params = [guildId, `%${q}%`];
@@ -1579,19 +1578,19 @@ app.get('/api/fishing/stats', async (req, res) => {
         }
 
         const [totalFish] = await db.execute(
-            'SELECT COUNT(*) as count FROM fish_catches WHERE guild_id = ?',
+            'SELECT COUNT(*) as count FROM server_fish_catches WHERE guild_id = ?',
             [guildId]
         );
         const [valuableFish] = await db.execute(
-            'SELECT MAX(value) as max_value FROM fish_catches WHERE guild_id = ?',
+            'SELECT MAX(value) as max_value FROM server_fish_catches WHERE guild_id = ?',
             [guildId]
         );
         const [legendaryFish] = await db.execute(
-            'SELECT COUNT(*) as count FROM fish_catches WHERE guild_id = ? AND rarity = "legendary"',
+            'SELECT COUNT(*) as count FROM server_fish_catches WHERE guild_id = ? AND rarity = "legendary"',
             [guildId]
         );
         const [activeAutofishers] = await db.execute(
-            'SELECT COUNT(*) as count FROM autofishers WHERE guild_id = ? AND active = true',
+            'SELECT COUNT(*) as count FROM server_autofishers WHERE guild_id = ? AND active = true',
             [guildId]
         );
 
@@ -1829,34 +1828,27 @@ async function getRealtimeStats() {
 // it's fetched on the HTTP /api/stats/overview request instead.
 async function getGuildRealtimeStats(guildId) {
     try {
-        // Economy — sum wallet + bank scoped to users active in this guild
+        // Economy — sum wallet + bank from server_users (per-guild balances)
         const [[economyValue]] = await db.execute(
-            'SELECT COALESCE(SUM(u.wallet + u.bank), 0) as total FROM users u WHERE u.user_id IN (SELECT DISTINCT user_id FROM command_stats WHERE guild_id = ?)',
+            'SELECT COALESCE(SUM(wallet + bank), 0) as total FROM server_users WHERE guild_id = ?',
             [guildId]
         );
 
-        // Commands today — guild-scoped only
+        // Commands today — from server_command_stats (per-guild)
         let commandsToday = { count: 0 };
         const [[guildCmds]] = await db.execute(
-            'SELECT COUNT(*) as count FROM command_stats WHERE guild_id = ? AND used_at >= CURDATE()',
+            'SELECT COUNT(*) as count FROM server_command_stats WHERE guild_id = ? AND used_at >= CURDATE()',
             [guildId]
         );
         commandsToday = guildCmds;
 
-        // Fish caught today — guild-scoped with global fallback
+        // Fish caught today — from server_fish_catches (per-guild)
         let fishToday = { count: 0 };
         const [[guildFish]] = await db.execute(
-            'SELECT COUNT(*) as count FROM fish_catches WHERE guild_id = ? AND caught_at >= CURDATE()',
+            'SELECT COUNT(*) as count FROM server_fish_catches WHERE guild_id = ? AND caught_at >= CURDATE()',
             [guildId]
         );
-        if (guildFish.count > 0) {
-            fishToday = guildFish;
-        } else {
-            const [[globalFish]] = await db.execute(
-                'SELECT COUNT(*) as count FROM fish_catches WHERE caught_at >= CURDATE()'
-            );
-            fishToday = globalFish;
-        }
+        fishToday = guildFish;
 
         return {
             guildId,
