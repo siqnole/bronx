@@ -33,6 +33,7 @@ if (!DISCORD_CLIENT_ID || !DISCORD_CLIENT_SECRET) {
 }
 
 // Middleware
+app.set('trust proxy', 1); // Trust first proxy (required for Render)
 app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, '.')));
@@ -44,6 +45,8 @@ app.use(session({
     saveUninitialized: false,
     cookie: {
         secure: process.env.NODE_ENV === 'production',
+        httpOnly: true,
+        sameSite: 'lax',
         maxAge: 24 * 60 * 60 * 1000 // 24 hours
     }
 }));
@@ -338,7 +341,8 @@ app.get('/callback', async (req, res) => {
         req.session.accessToken = access_token;
         req.session.accessibleGuilds = accessibleGuilds;
         
-        console.log(`\u2713 User ${user.username} authenticated with access to ${accessibleGuilds.length} servers`);
+        console.log(`✓ User ${user.username} authenticated with access to ${accessibleGuilds.length} servers`);
+        console.log(`Session ID: ${req.sessionID}, Cookie: ${JSON.stringify(req.session.cookie)}`);
         
         // Redirect to dashboard
         res.redirect('/?login=success');
@@ -360,6 +364,7 @@ app.get('/logout', (req, res) => {
 
 // Auth API endpoints
 app.get('/api/auth/user', (req, res) => {
+    console.log(`Auth check - Session ID: ${req.sessionID}, Has user: ${!!req.session.user}`);
     if (!req.session.user) {
         return res.json({ authenticated: false });
     }
