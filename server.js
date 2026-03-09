@@ -1661,6 +1661,10 @@ io.on('connection', (socket) => {
     socket.on('join-server', (serverId) => {
         socket.join(`server-${serverId}`);
         console.log(`Client joined server room: ${serverId}`);
+        // Immediately push per-guild stats to the newly joined client
+        getGuildRealtimeStats(serverId).then(guildStats => {
+            if (guildStats) socket.emit('server-stats-update', guildStats);
+        });
     });
     
     socket.on('leave-server', (serverId) => {
@@ -1743,6 +1747,47 @@ async function getRealtimeStats() {
     }
 }
 
+// Per-guild realtime stats — scoped to a specific server
+async function getGuildRealtimeStats(guildId) {
+    try {
+        const [userCount] = await db.execute(
+            'SELECT COUNT(DISTINCT user_id) as count FROM command_stats WHERE guild_id = ?',
+            [guildId]
+        );
+
+        const [economyValue] = await db.execute(`
+            SELECT COALESCE(SUM(u.wallet + u.bank), 0) as total
+            FROM users u
+            WHERE u.user_id IN (
+                SELECT DISTINCT user_id FROM command_stats WHERE guild_id = ?
+            )`,
+            [guildId]
+        );
+
+        const [commandsToday] = await db.execute(
+            'SELECT COUNT(*) as count FROM command_stats WHERE guild_id = ? AND used_at >= CURDATE()',
+            [guildId]
+        );
+
+        const [fishToday] = await db.execute(
+            'SELECT COUNT(*) as count FROM fish_catches WHERE guild_id = ? AND caught_at >= CURDATE()',
+            [guildId]
+        );
+
+        return {
+            guildId,
+            totalUsers: userCount[0].count,
+            totalEconomyValue: economyValue[0].total || 0,
+            commandsToday: commandsToday[0].count,
+            fishCaughtToday: fishToday[0].count,
+            timestamp: new Date()
+        };
+    } catch (error) {
+        console.error(`Failed to get guild realtime stats for ${guildId}:`, error);
+        return null;
+    }
+}
+
 function initializeRealTimeMonitoring() {
     console.log('🚀 Initializing real-time monitoring...');
     
@@ -1756,6 +1801,17 @@ function initializeRealTimeMonitoring() {
         const stats = await getRealtimeStats();
         if (stats) {
             io.emit('stats-update', stats);
+        }
+
+        // Also push per-guild stats to each active server room
+        const rooms = io.sockets.adapter.rooms;
+        for (const [room] of rooms) {
+            if (!room.startsWith('server-')) continue;
+            const guildId = room.replace('server-', '');
+            const guildStats = await getGuildRealtimeStats(guildId);
+            if (guildStats) {
+                io.to(room).emit('server-stats-update', guildStats);
+            }
         }
     }, 5000);
     

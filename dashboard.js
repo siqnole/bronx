@@ -60,11 +60,26 @@ class BronxBotDashboard {
             this.updateDatabaseStatus(data);
         });
 
-        // Stats update events
+        // Stats update events (global bot-health only — do NOT use for per-guild UI)
         this.socket.on('stats-update', (stats) => {
             this.lastStatsUpdate = new Date();
             this.realtimeData = stats;
-            this.updateRealtimeStats(stats);
+            // Do NOT call updateRealtimeStats with global data here;
+            // per-guild updates come via 'server-stats-update' below.
+            if (this.charts.overview) {
+                this.updateChartsWithRealtime(stats);
+            }
+            this.showDataUpdateIndicator();
+        });
+
+        // Per-guild realtime stats — scoped to the selected server
+        this.socket.on('server-stats-update', (stats) => {
+            if (
+                this.currentTab === 'overview' &&
+                stats.guildId === this.currentGuild
+            ) {
+                this.updateOverviewStats(stats);
+            }
         });
 
         // Initial stats when connecting
@@ -111,14 +126,11 @@ class BronxBotDashboard {
     updateRealtimeStats(stats) {
         if (!stats) return;
 
-        // Update overview stats if on overview tab
-        if (this.currentTab === 'overview') {
-            this.updateOverviewStats({
-                totalUsers: stats.users,
-                totalEconomyValue: stats.economy,
-                commandsToday: stats.commands?.lastHour ?? 0,
-                fishCaughtToday: stats.fishing?.today ?? 0
-            });
+        // Socket stats are GLOBAL (no guild filter) — do NOT use them to update
+        // per-server stat cards. Instead, re-fetch per-guild data from the REST API
+        // so that overview numbers always reflect the selected server only.
+        if (this.currentTab === 'overview' && this.selectedServerId) {
+            this.loadOverviewData();
         }
 
         // Update any charts with new data
