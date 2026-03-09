@@ -675,6 +675,12 @@ class BronxBotDashboard {
 
     // Tab Management
     switchTab(tabName) {
+        // Check if server is selected for non-overview tabs
+        if (!this.selectedServerId && tabName !== 'overview') {
+            this.showNotification('Please select a server first', 'warning');
+            // Still allow switching but data won't load
+        }
+        
         // Update sidebar
         document.querySelectorAll('.menu-item').forEach(item => {
             item.classList.remove('active');
@@ -862,6 +868,21 @@ class BronxBotDashboard {
     async loadOverviewData() {
         // Load overview statistics
         const stats = await this.apiCall('/stats/overview');
+        
+        const prompt = document.getElementById('server-select-prompt');
+        const content = document.getElementById('overview-content');
+        
+        if (stats && stats.noServerSelected) {
+            // Show server selection prompt, hide content
+            if (prompt) prompt.style.display = 'flex';
+            if (content) content.style.display = 'none';
+            return;
+        }
+        
+        // Hide prompt, show content
+        if (prompt) prompt.style.display = 'none';
+        if (content) content.style.display = 'block';
+        
         if (stats) {
             this.updateOverviewStats(stats);
         }
@@ -941,13 +962,24 @@ class BronxBotDashboard {
             });
 
             if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
+                // Only throw for user-initiated actions (POST, PUT, DELETE), not GET requests
+                const isUserAction = options.method && options.method !== 'GET';
+                if (isUserAction) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                // For GET requests, just log and return null silently
+                console.warn(`API ${endpoint}: ${response.status}`);
+                return null;
             }
 
             return await response.json();
         } catch (error) {
             console.error('API call failed:', error);
-            this.showNotification(`API Error: ${error.message}`, 'error');
+            // Only show notification for user-initiated actions
+            const isUserAction = options.method && options.method !== 'GET';
+            if (isUserAction) {
+                this.showNotification(`API Error: ${error.message}`, 'error');
+            }
             return null;
         }
     }
@@ -1099,6 +1131,7 @@ class BronxBotDashboard {
         const shopItems = await this.apiCall('/shop/items');
         if (shopItems) {
             this.updateShopItemsTable(shopItems);
+            this.populateDealItemDropdown(shopItems);
         }
 
         const dailyDeals = await this.apiCall('/shop/daily-deals');
@@ -1110,6 +1143,15 @@ class BronxBotDashboard {
         if (bazaarStats) {
             this.updateBazaarStats(bazaarStats);
         }
+    }
+
+    populateDealItemDropdown(items) {
+        const select = document.getElementById('deal-item-select');
+        if (!select || !items) return;
+        
+        // Keep the placeholder option and add all shop items
+        select.innerHTML = '<option value="">Select item...</option>' + 
+            items.map(item => `<option value="${item.item_id}">${item.name} ($${Number(item.price).toLocaleString()})</option>`).join('');
     }
 
     showAddShopItemModal() {
@@ -1324,8 +1366,8 @@ class BronxBotDashboard {
     }
 
     updateOverviewStats(stats) {
-        // Update stat cards with real data — scoped to overview section only
-        const section = document.getElementById('overview');
+        // Update stat cards with real data — scoped to overview content section
+        const section = document.getElementById('overview-content');
         if (!section) return;
         const statNumbers = section.querySelectorAll('.stat-number');
         const econVal = parseFloat(stats.totalEconomyValue) || 0;
@@ -1336,16 +1378,26 @@ class BronxBotDashboard {
     }
 
     updateRecentActivity(activities) {
-        const activityList = document.querySelector('.activity-list');
-        if (activityList && activities) {
-            activityList.innerHTML = activities.map(activity => `
-                <div class="activity-item">
-                    <i class="fas fa-${activity.icon}"></i>
-                    <span>${activity.description}</span>
-                    <span class="activity-time">${activity.time}</span>
+        const activityList = document.querySelector('#overview-content .activity-list');
+        if (!activityList) return;
+        
+        if (!activities || activities.length === 0) {
+            activityList.innerHTML = `
+                <div class="activity-item activity-empty">
+                    <i class="fas fa-info-circle"></i>
+                    <span>No recent activity in this server</span>
                 </div>
-            `).join('');
+            `;
+            return;
         }
+        
+        activityList.innerHTML = activities.map(activity => `
+            <div class="activity-item">
+                <i class="fas fa-${activity.icon}"></i>
+                <span>${activity.description}</span>
+                <span class="activity-time">${activity.time}</span>
+            </div>
+        `).join('');
     }
 
     // Save all changes

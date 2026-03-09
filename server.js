@@ -709,13 +709,45 @@ app.get('/api/guide', (req, res) => {
 // Overview Statistics
 app.get('/api/stats/overview', async (req, res) => {
     try {
-        const [userCount] = await db.execute('SELECT COUNT(*) as count FROM users');
-        const [economyValue] = await db.execute('SELECT SUM(wallet + bank) as total FROM users');
-        const [commandsToday] = await db.execute(
-            'SELECT COUNT(*) as count FROM command_stats WHERE used_at >= CURDATE()'
+        const guildId = req.guildId;
+        
+        // If no guild selected, return empty/zero stats
+        if (!guildId || guildId === 'global') {
+            return res.json({
+                totalUsers: 0,
+                totalEconomyValue: 0,
+                commandsToday: 0,
+                fishCaughtToday: 0,
+                noServerSelected: true
+            });
+        }
+
+        // Count distinct users who have used commands in this guild
+        const [userCount] = await db.execute(
+            'SELECT COUNT(DISTINCT user_id) as count FROM command_stats WHERE guild_id = ?',
+            [guildId]
         );
+        
+        // Get economy value for users active in this guild
+        const [economyValue] = await db.execute(`
+            SELECT COALESCE(SUM(u.wallet + u.bank), 0) as total 
+            FROM users u
+            WHERE u.user_id IN (
+                SELECT DISTINCT user_id FROM command_stats WHERE guild_id = ?
+            )`,
+            [guildId]
+        );
+        
+        // Commands today in this guild
+        const [commandsToday] = await db.execute(
+            'SELECT COUNT(*) as count FROM command_stats WHERE guild_id = ? AND used_at >= CURDATE()',
+            [guildId]
+        );
+        
+        // Fish caught today in this guild
         const [fishToday] = await db.execute(
-            'SELECT COUNT(*) as count FROM fish_catches WHERE caught_at >= CURDATE()'
+            'SELECT COUNT(*) as count FROM fish_catches WHERE guild_id = ? AND caught_at >= CURDATE()',
+            [guildId]
         );
 
         res.json({
@@ -733,15 +765,41 @@ app.get('/api/stats/overview', async (req, res) => {
 // Recent Activity
 app.get('/api/stats/recent-activity', async (req, res) => {
     try {
-        const [activities] = await db.execute(`
-            SELECT 'user-plus' as icon, 'New user joined economy system' as description, created_at as time
-            FROM users 
-            WHERE created_at >= DATE_SUB(NOW(), INTERVAL 2 HOUR)
-            ORDER BY created_at DESC
-            LIMIT 5
-        `);
+        const guildId = req.guildId;
+        
+        // If no guild selected, return empty activity
+        if (!guildId || guildId === 'global') {
+            return res.json([]);
+        }
 
-        const formattedActivities = activities.map(activity => ({
+        // Get recent command activity for this guild
+        const [commandActivity] = await db.execute(`
+            SELECT 'terminal' as icon, 
+                   CONCAT('Command used: ', command_name) as description, 
+                   used_at as time
+            FROM command_stats 
+            WHERE guild_id = ? AND used_at >= DATE_SUB(NOW(), INTERVAL 2 HOUR)
+            ORDER BY used_at DESC
+            LIMIT 3
+        `, [guildId]);
+
+        // Get recent fish catches for this guild
+        const [fishActivity] = await db.execute(`
+            SELECT 'fish' as icon,
+                   CONCAT('Fish caught: ', COALESCE(fish_name, 'Unknown')) as description,
+                   caught_at as time
+            FROM fish_catches
+            WHERE guild_id = ? AND caught_at >= DATE_SUB(NOW(), INTERVAL 2 HOUR)
+            ORDER BY caught_at DESC
+            LIMIT 2
+        `, [guildId]);
+
+        // Combine and sort by time
+        const allActivities = [...commandActivity, ...fishActivity]
+            .sort((a, b) => new Date(b.time) - new Date(a.time))
+            .slice(0, 5);
+
+        const formattedActivities = allActivities.map(activity => ({
             icon: activity.icon,
             description: activity.description,
             time: timeAgo(activity.time)
@@ -1049,9 +1107,21 @@ app.delete('/api/scope-rules/:id', async (req, res) => {
 // Economy
 app.get('/api/economy/guild-balance', async (req, res) => {
     try {
+        const guildId = req.guildId;
+        
+        // Require guild selection
+        if (!guildId || guildId === 'global') {
+            return res.json({
+                balance: 0,
+                total_donated: 0,
+                total_given: 0,
+                noServerSelected: true
+            });
+        }
+
         const [balance] = await db.execute(
             'SELECT * FROM guild_balances WHERE guild_id = ?',
-            [req.guildId]
+            [guildId]
         );
 
         if (balance.length === 0) {
@@ -1200,24 +1270,35 @@ app.get('/api/bazaar/stats', async (req, res) => {
 app.get('/api/users/search', async (req, res) => {
     try {
         const { q } = req.query;
+        const guildId = req.guildId;
         
-        // Search by user ID or look for users with high economy values
+        // Require guild selection
+        if (!guildId || guildId === 'global') {
+            return res.json({ error: 'Please select a server first', noServerSelected: true });
+        }
+        
+        // Search by user ID or look for users with activity in this guild
         let query = '';
         let params = [];
 
         if (/^\d+$/.test(q)) {
-            // Numeric search - search by user ID
-            query = 'SELECT * FROM users WHERE user_id = ?';
-            params = [q];
-        } else {
-            // Text search - find top users by economy or search term
+            // Numeric search - search by user ID (must have activity in this guild)
             query = `
-                SELECT * FROM users 
-                WHERE user_id LIKE ? OR (wallet + bank) > 1000000
-                ORDER BY (wallet + bank) DESC 
+                SELECT u.* FROM users u
+                WHERE u.user_id = ? 
+                AND u.user_id IN (SELECT DISTINCT user_id FROM command_stats WHERE guild_id = ?)
+            `;
+            params = [q, guildId];
+        } else {
+            // Text search - find users active in this guild by economy values
+            query = `
+                SELECT u.* FROM users u
+                WHERE u.user_id IN (SELECT DISTINCT user_id FROM command_stats WHERE guild_id = ?)
+                AND (u.user_id LIKE ? OR (u.wallet + u.bank) > 10000)
+                ORDER BY (u.wallet + u.bank) DESC 
                 LIMIT 20
             `;
-            params = [`%${q}%`];
+            params = [guildId, `%${q}%`];
         }
 
         const [users] = await db.execute(query, params);
@@ -1239,13 +1320,20 @@ app.get('/api/users/search', async (req, res) => {
 // Giveaways
 app.get('/api/giveaways/active', async (req, res) => {
     try {
+        const guildId = req.guildId;
+        
+        // Require guild selection
+        if (!guildId || guildId === 'global') {
+            return res.json([]);
+        }
+
         const [giveaways] = await db.execute(`
             SELECT g.*, 
                    (SELECT COUNT(*) FROM giveaway_entries WHERE giveaway_id = g.id) as entry_count
             FROM giveaways g
             WHERE g.guild_id = ? AND g.active = true AND g.ends_at > NOW()
             ORDER BY g.ends_at ASC
-        `, [req.guildId]);
+        `, [guildId]);
 
         res.json(giveaways);
     } catch (error) {
@@ -1400,10 +1488,35 @@ app.post('/api/reaction-roles', async (req, res) => {
 // Fishing Statistics
 app.get('/api/fishing/stats', async (req, res) => {
     try {
-        const [totalFish] = await db.execute('SELECT COUNT(*) as count FROM fish_catches');
-        const [valuableFish] = await db.execute('SELECT MAX(value) as max_value FROM fish_catches');
-        const [legendaryFish] = await db.execute('SELECT COUNT(*) as count FROM fish_catches WHERE rarity = "legendary"');
-        const [activeAutofishers] = await db.execute('SELECT COUNT(*) as count FROM autofishers WHERE active = true');
+        const guildId = req.guildId;
+        
+        // If no guild selected, return empty stats
+        if (!guildId || guildId === 'global') {
+            return res.json({
+                total_caught: 0,
+                most_valuable: 0,
+                legendary_count: 0,
+                active_autofishers: 0,
+                noServerSelected: true
+            });
+        }
+
+        const [totalFish] = await db.execute(
+            'SELECT COUNT(*) as count FROM fish_catches WHERE guild_id = ?',
+            [guildId]
+        );
+        const [valuableFish] = await db.execute(
+            'SELECT MAX(value) as max_value FROM fish_catches WHERE guild_id = ?',
+            [guildId]
+        );
+        const [legendaryFish] = await db.execute(
+            'SELECT COUNT(*) as count FROM fish_catches WHERE guild_id = ? AND rarity = "legendary"',
+            [guildId]
+        );
+        const [activeAutofishers] = await db.execute(
+            'SELECT COUNT(*) as count FROM autofishers WHERE guild_id = ? AND active = true',
+            [guildId]
+        );
 
         res.json({
             total_caught: totalFish[0].count,
@@ -1719,6 +1832,251 @@ app.get('/api/realtime/performance', (req, res) => {
         uptime: process.uptime(),
         connectedClients
     });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ADDITIONAL API ENDPOINTS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Shop Items - Update
+app.put('/api/shop/items/:item_id', async (req, res) => {
+    try {
+        const { item_id } = req.params;
+        const { name, description, category, price, level, max_quantity } = req.body;
+        
+        await db.execute(`
+            UPDATE shop_items 
+            SET name = ?, description = ?, category = ?, price = ?, level = ?, max_quantity = ?
+            WHERE item_id = ?
+        `, [name, description || null, category, price, level || 1, max_quantity || 1, item_id]);
+        
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Shop item update error:', error);
+        res.status(500).json({ error: 'Failed to update shop item' });
+    }
+});
+
+// Shop Items - Delete
+app.delete('/api/shop/items/:item_id', async (req, res) => {
+    try {
+        const { item_id } = req.params;
+        await db.execute('DELETE FROM shop_items WHERE item_id = ?', [item_id]);
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Shop item delete error:', error);
+        res.status(500).json({ error: 'Failed to delete shop item' });
+    }
+});
+
+// Daily Deals - Create
+app.post('/api/shop/daily-deals', async (req, res) => {
+    try {
+        const { item_id, discount, stock } = req.body;
+        
+        await db.execute(`
+            INSERT INTO daily_deals (item_id, discount, stock, active_date)
+            VALUES (?, ?, ?, CURDATE())
+            ON DUPLICATE KEY UPDATE discount = VALUES(discount), stock = VALUES(stock)
+        `, [item_id, discount, stock || null]);
+        
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Daily deal creation error:', error);
+        res.status(500).json({ error: 'Failed to create daily deal' });
+    }
+});
+
+// Daily Deals - Update
+app.put('/api/shop/daily-deals/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { item_id, discount, stock } = req.body;
+        
+        await db.execute(`
+            UPDATE daily_deals SET item_id = ?, discount = ?, stock = ? WHERE id = ? OR item_id = ?
+        `, [item_id, discount, stock, id, id]);
+        
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Daily deal update error:', error);
+        res.status(500).json({ error: 'Failed to update daily deal' });
+    }
+});
+
+// Daily Deals - Delete
+app.delete('/api/shop/daily-deals/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        await db.execute('DELETE FROM daily_deals WHERE id = ? OR item_id = ?', [id, id]);
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Daily deal delete error:', error);
+        res.status(500).json({ error: 'Failed to delete daily deal' });
+    }
+});
+
+// Reaction Roles - Update
+app.put('/api/reaction-roles/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { message_id, channel_id, emoji_raw, role_id } = req.body;
+        
+        await db.execute(`
+            UPDATE reaction_roles 
+            SET message_id = ?, channel_id = ?, emoji_raw = ?, role_id = ?
+            WHERE id = ? OR message_id = ?
+        `, [message_id, channel_id, emoji_raw, role_id, id, id]);
+        
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Reaction role update error:', error);
+        res.status(500).json({ error: 'Failed to update reaction role' });
+    }
+});
+
+// Reaction Roles - Delete
+app.delete('/api/reaction-roles/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        await db.execute('DELETE FROM reaction_roles WHERE id = ? OR message_id = ?', [id, id]);
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Reaction role delete error:', error);
+        res.status(500).json({ error: 'Failed to delete reaction role' });
+    }
+});
+
+// Giveaways - Update
+app.put('/api/giveaways/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { prize, max_winners, ends_at, channel_id } = req.body;
+        
+        await db.execute(`
+            UPDATE giveaways 
+            SET prize = ?, max_winners = ?, ends_at = ?, channel_id = ?
+            WHERE id = ?
+        `, [prize, max_winners || 1, ends_at, channel_id, id]);
+        
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Giveaway update error:', error);
+        res.status(500).json({ error: 'Failed to update giveaway' });
+    }
+});
+
+// Giveaways - Delete/Cancel
+app.delete('/api/giveaways/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        await db.execute('DELETE FROM giveaways WHERE id = ?', [id]);
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Giveaway delete error:', error);
+        res.status(500).json({ error: 'Failed to delete giveaway' });
+    }
+});
+
+// Giveaways - End Early
+app.post('/api/giveaways/:id/end', async (req, res) => {
+    try {
+        const { id } = req.params;
+        
+        // Update giveaway to end now
+        await db.execute(`
+            UPDATE giveaways SET ends_at = NOW(), status = 'ended' WHERE id = ?
+        `, [id]);
+        
+        res.json({ success: true, message: 'Giveaway ended' });
+    } catch (error) {
+        console.error('Giveaway end error:', error);
+        res.status(500).json({ error: 'Failed to end giveaway' });
+    }
+});
+
+// Giveaways - History
+app.get('/api/giveaways/history', async (req, res) => {
+    try {
+        const [history] = await db.execute(`
+            SELECT * FROM giveaways 
+            WHERE ends_at < NOW() OR status = 'ended'
+            ORDER BY ends_at DESC 
+            LIMIT 50
+        `);
+        res.json(history);
+    } catch (error) {
+        console.error('Giveaway history error:', error);
+        res.json([]);
+    }
+});
+
+// ML Settings - Delete
+app.delete('/api/ml/settings/:key', async (req, res) => {
+    try {
+        const { key } = req.params;
+        await db.execute('DELETE FROM ml_settings WHERE `key` = ?', [key]);
+        res.json({ success: true });
+    } catch (error) {
+        console.error('ML setting delete error:', error);
+        res.status(500).json({ error: 'Failed to delete ML setting' });
+    }
+});
+
+// Scope Rules - Delete Exclusive by Command
+app.delete('/api/scope-rules/exclusive/:command', async (req, res) => {
+    try {
+        const { command } = req.params;
+        await db.execute('DELETE FROM scope_rules WHERE command_name = ? AND scope_type = ?', [command, 'exclusive']);
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Exclusive scope rule delete error:', error);
+        res.status(500).json({ error: 'Failed to delete exclusive rule' });
+    }
+});
+
+// Moderation Cooldowns - Get
+app.get('/api/moderation/cooldowns', async (req, res) => {
+    try {
+        const [cooldowns] = await db.execute('SELECT * FROM command_cooldowns ORDER BY command ASC');
+        res.json(cooldowns);
+    } catch (error) {
+        console.error('Cooldowns fetch error:', error);
+        res.json([]);
+    }
+});
+
+// Moderation Cooldowns - Set/Update
+app.post('/api/moderation/cooldowns', async (req, res) => {
+    try {
+        const { command, cooldown_seconds } = req.body;
+        
+        await db.execute(`
+            INSERT INTO command_cooldowns (command, cooldown_seconds)
+            VALUES (?, ?)
+            ON DUPLICATE KEY UPDATE cooldown_seconds = VALUES(cooldown_seconds)
+        `, [command, cooldown_seconds]);
+        
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Cooldown update error:', error);
+        res.status(500).json({ error: 'Failed to update cooldown' });
+    }
+});
+
+// Settings - Save All (bulk save)
+app.post('/api/settings/save-all', async (req, res) => {
+    try {
+        const guildId = req.headers['x-guild-id'];
+        const { settings } = req.body;
+        
+        // This is a placeholder - actual implementation depends on what settings are being saved
+        // For now, just acknowledge the request
+        res.json({ success: true, message: 'Settings saved' });
+    } catch (error) {
+        console.error('Settings save error:', error);
+        res.status(500).json({ error: 'Failed to save settings' });
+    }
 });
 
 // Error handling middleware

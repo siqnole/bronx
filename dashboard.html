@@ -138,66 +138,66 @@
             
             <!-- Overview Tab -->
             <section id="overview" class="tab-content active">
-                <div class="stats-grid">
-                    <div class="stat-card">
-                        <div class="stat-icon">
-                            <i class="fas fa-users"></i>
-                        </div>
-                        <div class="stat-info">
-                            <h3>Total Users</h3>
-                            <p class="stat-number">1,234</p>
-                        </div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-icon">
-                            <i class="fas fa-coins"></i>
-                        </div>
-                        <div class="stat-info">
-                            <h3>Total Economy Value</h3>
-                            <p class="stat-number">$12.5M</p>
-                        </div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-icon">
-                            <i class="fas fa-terminal"></i>
-                        </div>
-                        <div class="stat-info">
-                            <h3>Commands Today</h3>
-                            <p class="stat-number">8,456</p>
-                        </div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-icon">
-                            <i class="fas fa-fish"></i>
-                        </div>
-                        <div class="stat-info">
-                            <h3>Fish Caught Today</h3>
-                            <p class="stat-number">2,341</p>
-                        </div>
+                <!-- Server Selection Prompt Overlay -->
+                <div id="server-select-prompt" class="server-select-overlay">
+                    <div class="server-select-prompt-content">
+                        <i class="fas fa-server" style="font-size: 3rem; color: var(--primary-color); margin-bottom: 1rem;"></i>
+                        <h2>Select a Server</h2>
+                        <p>Choose a server from the dropdown in the sidebar to view its statistics and manage settings.</p>
                     </div>
                 </div>
-
-                <div class="chart-container">
-                    <canvas id="activity-chart"></canvas>
-                </div>
-
-                <div class="recent-activity">
-                    <h3>Recent Activity</h3>
-                    <div class="activity-list">
-                        <div class="activity-item">
-                            <i class="fas fa-user-plus"></i>
-                            <span>New user joined economy system</span>
-                            <span class="activity-time">2 minutes ago</span>
+                
+                <div id="overview-content" class="overview-content" style="display: none;">
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-icon">
+                                <i class="fas fa-users"></i>
+                            </div>
+                            <div class="stat-info">
+                                <h3>Active Members</h3>
+                                <p class="stat-number">0</p>
+                            </div>
                         </div>
-                        <div class="activity-item">
-                            <i class="fas fa-gift"></i>
-                            <span>Giveaway #123 completed with 45 participants</span>
-                            <span class="activity-time">15 minutes ago</span>
+                        <div class="stat-card">
+                            <div class="stat-icon">
+                                <i class="fas fa-coins"></i>
+                            </div>
+                            <div class="stat-info">
+                                <h3>Server Economy</h3>
+                                <p class="stat-number">$0</p>
+                            </div>
                         </div>
-                        <div class="activity-item">
-                            <i class="fas fa-store"></i>
-                            <span>Daily deals refreshed in marketplace</span>
-                            <span class="activity-time">1 hour ago</span>
+                        <div class="stat-card">
+                            <div class="stat-icon">
+                                <i class="fas fa-terminal"></i>
+                            </div>
+                            <div class="stat-info">
+                                <h3>Commands Today</h3>
+                                <p class="stat-number">0</p>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon">
+                                <i class="fas fa-fish"></i>
+                            </div>
+                            <div class="stat-info">
+                                <h3>Fish Caught Today</h3>
+                                <p class="stat-number">0</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="chart-container">
+                        <canvas id="activity-chart"></canvas>
+                    </div>
+
+                    <div class="recent-activity">
+                        <h3>Recent Server Activity</h3>
+                        <div class="activity-list">
+                            <div class="activity-item activity-empty">
+                                <i class="fas fa-info-circle"></i>
+                                <span>No recent activity in this server</span>
+                            </div>
                         </div>
                     </div>
                 </div>
