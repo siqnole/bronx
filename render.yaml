@@ -1,9 +1,21 @@
 services:
+  - type: redis
+    name: bronx-cache
+    ipAllowList: [] # only allow internal connections
+    plan: free
+    maxmemoryPolicy: allkeys-lru
+
   - type: web
     name: bronx-site
-    env: static
-    buildCommand: echo "No build needed"
-    staticPublishPath: site
+    runtime: node
+    buildCommand: npm install
+    startCommand: node server.js
+    envVars:
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: bronx-cache
+          property: connectionString
     headers:
       - path: /*
         name: Cache-Control
