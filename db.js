@@ -225,8 +225,23 @@ async function initDatabase() {
         ) ENGINE=InnoDB`);
 
         // Migration: convert ENUM event_type columns to VARCHAR(16) for compatibility with bot
-        try { await db.execute('ALTER TABLE guild_member_events MODIFY COLUMN event_type VARCHAR(16) NOT NULL'); } catch (e) { /* already VARCHAR or table doesn\'t exist */ }
-        try { await db.execute('ALTER TABLE guild_message_events MODIFY COLUMN event_type VARCHAR(16) NOT NULL'); } catch (e) { /* already VARCHAR or table doesn\'t exist */ }
+        try { await db.execute('ALTER TABLE guild_member_events MODIFY COLUMN event_type VARCHAR(16) NOT NULL'); } catch (e) { /* already VARCHAR or table doesn't exist */ }
+        try { await db.execute('ALTER TABLE guild_message_events MODIFY COLUMN event_type VARCHAR(16) NOT NULL'); } catch (e) { /* already VARCHAR or table doesn't exist */ }
+
+        // User activity daily — tracks messages, voice, commands per user per day (for leaderboards)
+        await db.execute(`CREATE TABLE IF NOT EXISTS user_activity_daily (
+            guild_id BIGINT UNSIGNED NOT NULL,
+            user_id BIGINT UNSIGNED NOT NULL,
+            stat_date DATE NOT NULL,
+            messages INT UNSIGNED NOT NULL DEFAULT 0,
+            edits INT UNSIGNED NOT NULL DEFAULT 0,
+            deletes INT UNSIGNED NOT NULL DEFAULT 0,
+            commands_used INT UNSIGNED NOT NULL DEFAULT 0,
+            voice_minutes INT UNSIGNED NOT NULL DEFAULT 0,
+            PRIMARY KEY (guild_id, user_id, stat_date),
+            INDEX idx_guild_date (guild_id, stat_date),
+            INDEX idx_user_date (user_id, stat_date)
+        ) ENGINE=InnoDB`);
         // Track command usage per day per channel
         await db.execute(`CREATE TABLE IF NOT EXISTS guild_command_usage (
             guild_id BIGINT UNSIGNED NOT NULL,
