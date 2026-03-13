@@ -270,18 +270,18 @@ async function initDatabase() {
         ) ENGINE=InnoDB`);
 
         // Migration: rename old bare-name columns to *_count if needed, and add missing columns
+        // Using simple ADD COLUMN (no IF NOT EXISTS) since MySQL doesn't support it - wrapped in try/catch
         const dailyStatsMigrations = [
-            // Add missing columns (safe even if they already exist)
-            "ALTER TABLE guild_daily_stats ADD COLUMN IF NOT EXISTS edits_count INT NOT NULL DEFAULT 0",
-            "ALTER TABLE guild_daily_stats ADD COLUMN IF NOT EXISTS deletes_count INT NOT NULL DEFAULT 0",
-            "ALTER TABLE guild_daily_stats ADD COLUMN IF NOT EXISTS joins_count INT NOT NULL DEFAULT 0",
-            "ALTER TABLE guild_daily_stats ADD COLUMN IF NOT EXISTS leaves_count INT NOT NULL DEFAULT 0",
-            "ALTER TABLE guild_daily_stats ADD COLUMN IF NOT EXISTS commands_count INT NOT NULL DEFAULT 0",
-            "ALTER TABLE guild_daily_stats ADD COLUMN IF NOT EXISTS active_users INT NOT NULL DEFAULT 0",
-            "ALTER TABLE guild_daily_stats ADD COLUMN IF NOT EXISTS messages_count INT NOT NULL DEFAULT 0",
+            "ALTER TABLE guild_daily_stats ADD COLUMN edits_count INT NOT NULL DEFAULT 0",
+            "ALTER TABLE guild_daily_stats ADD COLUMN deletes_count INT NOT NULL DEFAULT 0",
+            "ALTER TABLE guild_daily_stats ADD COLUMN joins_count INT NOT NULL DEFAULT 0",
+            "ALTER TABLE guild_daily_stats ADD COLUMN leaves_count INT NOT NULL DEFAULT 0",
+            "ALTER TABLE guild_daily_stats ADD COLUMN commands_count INT NOT NULL DEFAULT 0",
+            "ALTER TABLE guild_daily_stats ADD COLUMN active_users INT NOT NULL DEFAULT 0",
+            "ALTER TABLE guild_daily_stats ADD COLUMN messages_count INT NOT NULL DEFAULT 0",
         ];
         for (const sql of dailyStatsMigrations) {
-            try { await db.execute(sql); } catch (e) { /* column already exists or unsupported syntax */ }
+            try { await db.execute(sql); } catch (e) { /* column already exists - error 1060 */ }
         }
         // If old bare-name columns exist, copy data and drop them
         try {
