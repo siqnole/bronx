@@ -7,8 +7,18 @@ const DISCORD_API_BASE = 'https://discord.com/api/v10';
 const DISCORD_CLIENT_ID = process.env.DISCORD_CLIENT_ID;
 const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET;
 const PORT = process.env.PORT || 3000;
-const DISCORD_REDIRECT_URI = process.env.DISCORD_REDIRECT_URI || `http://localhost:${PORT}/callback`;
 const BOT_OWNER_ID = process.env.BOT_OWNER_ID || '';
+
+// Build redirect URI dynamically from the incoming request so it works
+// on localhost, Render, and any custom domain without changing .env
+function getRedirectUri(req) {
+    if (process.env.DISCORD_REDIRECT_URI) {
+        return process.env.DISCORD_REDIRECT_URI;
+    }
+    const protocol = req.protocol;            // respects trust proxy
+    const host = req.get('host');             // includes port if non-standard
+    return `${protocol}://${host}/callback`;
+}
 
 // ── OAuth2 Helper Functions ─────────────────────────────────────────────
 
@@ -66,7 +76,8 @@ function getUserPermissions(userGuild) {
 
 router.get('/login', (req, res) => {
     const scopes = ['identify', 'guilds'];
-    const authUrl = `https://discord.com/api/oauth2/authorize?client_id=${DISCORD_CLIENT_ID}&redirect_uri=${encodeURIComponent(DISCORD_REDIRECT_URI)}&response_type=code&scope=${scopes.join('%20')}`;
+    const redirectUri = getRedirectUri(req);
+    const authUrl = `https://discord.com/api/oauth2/authorize?client_id=${DISCORD_CLIENT_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${scopes.join('%20')}`;
     res.redirect(authUrl);
 });
 
@@ -79,13 +90,14 @@ router.get('/callback', async (req, res) => {
     
     try {
         // Exchange code for access token
+        const redirectUri = getRedirectUri(req);
         const tokenResponse = await axios.post(`${DISCORD_API_BASE}/oauth2/token`, 
             new URLSearchParams({
                 client_id: DISCORD_CLIENT_ID,
                 client_secret: DISCORD_CLIENT_SECRET,
                 grant_type: 'authorization_code',
                 code: code,
-                redirect_uri: DISCORD_REDIRECT_URI
+                redirect_uri: redirectUri
             }).toString(),
             {
                 headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
