@@ -578,6 +578,42 @@ body {
     color: var(--accent);
 }
 
+/* ── Bot Not Present (dimmed + invite) ───────────────────── */
+.server-card--no-bot {
+    opacity: 0.45;
+    position: relative;
+}
+
+.server-card--no-bot:hover {
+    opacity: 0.75;
+}
+
+.server-card--no-bot .server-card-icon img,
+.server-card--no-bot .server-card-icon .server-initial {
+    filter: grayscale(0.5);
+}
+
+.server-card-invite-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.25rem 0.6rem;
+    font-size: 0.68rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    border-radius: 999px;
+    flex-shrink: 0;
+    transition: all 0.2s;
+}
+
+.server-card--no-bot:hover .server-card-invite-badge {
+    background: var(--accent);
+    color: var(--bg);
+}
+
 /* ── No Servers ──────────────────────────────────────────── */
 .no-servers {
     text-align: center;

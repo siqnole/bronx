@@ -49,8 +49,11 @@
                 show(ownerCardWrap);
             }
 
-            // Build server list
+            // Build server list — bot-present first, then alphabetical
             allGuilds = (data.guilds || []).slice().sort((a, b) => {
+                const aBp = a.botPresent !== false ? 0 : 1;
+                const bBp = b.botPresent !== false ? 0 : 1;
+                if (aBp !== bBp) return aBp - bBp;
                 return (a.name || '').localeCompare(b.name || '');
             });
 
@@ -66,6 +69,8 @@
         }
     }
 
+    const BOT_INVITE_URL = 'https://discord.com/oauth2/authorize?client_id=828380019406929962&permissions=8&scope=bot%20applications.commands';
+
     /* ── Render Guild Cards ───────────────────────────────── */
     function renderGuilds(guilds) {
         serverGrid.innerHTML = '';
@@ -78,9 +83,13 @@
 
         const frag = document.createDocumentFragment();
         for (const guild of guilds) {
+            const botPresent = guild.botPresent !== false;
             const card = document.createElement('a');
-            card.href = `/dashboard?server=${guild.id}`;
-            card.className = 'server-card';
+            card.href = botPresent
+                ? `/dashboard?server=${guild.id}`
+                : `${BOT_INVITE_URL}&guild_id=${guild.id}&disable_guild_select=true`;
+            if (!botPresent) card.target = '_blank';
+            card.className = 'server-card' + (botPresent ? '' : ' server-card--no-bot');
             card.dataset.name = (guild.name || '').toLowerCase();
 
             // Icon
@@ -114,13 +123,23 @@
             info.appendChild(name);
             info.appendChild(role);
 
-            // Arrow
-            const arrow = document.createElement('i');
-            arrow.className = 'fas fa-chevron-right server-card-arrow';
+            // Invite badge (shown when bot is not in the server)
+            if (!botPresent) {
+                const badge = document.createElement('span');
+                badge.className = 'server-card-invite-badge';
+                badge.innerHTML = '<i class="fas fa-plus"></i> invite';
+                card.appendChild(iconWrap);
+                card.appendChild(info);
+                card.appendChild(badge);
+            } else {
+                // Arrow
+                const arrow = document.createElement('i');
+                arrow.className = 'fas fa-chevron-right server-card-arrow';
+                card.appendChild(iconWrap);
+                card.appendChild(info);
+                card.appendChild(arrow);
+            }
 
-            card.appendChild(iconWrap);
-            card.appendChild(info);
-            card.appendChild(arrow);
             frag.appendChild(card);
         }
         serverGrid.appendChild(frag);

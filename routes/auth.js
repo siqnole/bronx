@@ -119,15 +119,17 @@ router.get('/callback', async (req, res) => {
         const botGuilds = await getBotGuilds();
         const botGuildIds = new Set(botGuilds.map(g => g.id));
         
-        // Filter guilds where user has management permissions AND bot is present
+        // Include guilds where user has management permissions
+        // Mark whether the bot is present in each guild
         const accessibleGuilds = userGuilds.filter(guild => {
             const perms = getUserPermissions(guild);
-            return (perms.isOwner || perms.canManage || perms.canAdmin) && botGuildIds.has(guild.id);
+            return perms.isOwner || perms.canManage || perms.canAdmin;
         }).map(guild => ({
             id: guild.id,
             name: guild.name,
             icon: guild.icon,
-            permissions: getUserPermissions(guild)
+            permissions: getUserPermissions(guild),
+            botPresent: botGuildIds.has(guild.id)
         }));
         
         // Store in session
