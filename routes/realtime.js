@@ -138,52 +138,48 @@ async function getGuildRealtimeStats(guildId) {
     try {
         const db = getDb();
 
-        // Economy value: try server_users, fall back to global users
-        let economyValue = { total: 0 };
+        // Economy value: try economy_profiles (v2) ONLY - don't fall back to global users
+        // The initial API call already has the correct value; we should only update if we have guild-specific data
+        let economyValue = null;  // null means "don't update"
         try {
             const [[ev]] = await db.execute(
-                'SELECT COALESCE(SUM(wallet + bank), 0) as total FROM server_users WHERE guild_id = ?',
+                'SELECT COALESCE(SUM(wallet + bank), 0) as total FROM economy_profiles WHERE guild_id = ?',
                 [guildId]
             );
-            economyValue = ev;
+            economyValue = ev.total || 0;
         } catch (e) {
-            try {
-                const [[ev]] = await db.execute('SELECT COALESCE(SUM(wallet + bank), 0) as total FROM users');
-                economyValue = ev;
-            } catch (e2) { /* ignore */ }
+            // economy_profiles doesn't exist or query failed - leave as null to skip updating
         }
 
-        // Commands today: try server_command_stats, fall back to guild_command_usage (replicated)
+        // Commands today: try guild_command_usage (v2), fall back to command_stats
         let commandsToday = { count: 0 };
         try {
             const [[guildCmds]] = await db.execute(
-                'SELECT COUNT(*) as count FROM server_command_stats WHERE guild_id = ? AND used_at >= CURDATE()',
+                'SELECT COALESCE(SUM(use_count), 0) as count FROM guild_command_usage WHERE guild_id = ? AND usage_date = CURDATE()',
                 [guildId]
             );
             commandsToday = guildCmds;
         } catch (e) {
             try {
                 const [[guildCmds]] = await db.execute(
-                    'SELECT COALESCE(SUM(use_count), 0) as count FROM guild_command_usage WHERE guild_id = ? AND usage_date = CURDATE()',
-                    [guildId]
+                    'SELECT COUNT(*) as count FROM command_stats WHERE used_at >= CURDATE()'
                 );
                 commandsToday = guildCmds;
             } catch (e2) { /* ignore */ }
         }
 
-        // Fish today: try server_fish_catches, fall back to fish_catches
+        // Fish today: try user_fish_catches (v2), fall back to fish_catches (no guild filter)
         let fishToday = { count: 0 };
         try {
             const [[guildFish]] = await db.execute(
-                'SELECT COUNT(*) as count FROM server_fish_catches WHERE guild_id = ? AND caught_at >= CURDATE()',
+                'SELECT COUNT(*) as count FROM user_fish_catches WHERE guild_id = ? AND caught_at >= CURDATE()',
                 [guildId]
             );
             fishToday = guildFish;
         } catch (e) {
             try {
                 const [[guildFish]] = await db.execute(
-                    'SELECT COUNT(*) as count FROM fish_catches WHERE guild_id = ? AND caught_at >= CURDATE()',
-                    [guildId]
+                    'SELECT COUNT(*) as count FROM fish_catches WHERE caught_at >= CURDATE()'
                 );
                 fishToday = guildFish;
             } catch (e2) { /* ignore */ }
@@ -191,7 +187,7 @@ async function getGuildRealtimeStats(guildId) {
 
         return {
             guildId,
-            totalEconomyValue: economyValue.total || 0,
+            totalEconomyValue: economyValue,  // null if we couldn't get guild-specific data
             commandsToday: commandsToday.count,
             fishCaughtToday: fishToday.count,
             timestamp: new Date()

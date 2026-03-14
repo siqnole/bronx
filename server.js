@@ -37,6 +37,7 @@ const fishingRoutes = require('./routes/fishing');
 const botRoutes = require('./routes/bot');
 const guideRoutes = require('./routes/guide');
 const privacyRoutes = require('./routes/privacy');
+const avatarProxyRoutes = require('./routes/avatar-proxy');
 const { initSocket, initializeRealTimeMonitoring, registerRoutes: registerRealtimeRoutes } = require('./routes/realtime');
 
 // ── App & server setup ──────────────────────────────────────────────────
@@ -94,7 +95,7 @@ app.use(securityLogger);
 app.use('/api/', rateLimiters.api);
 
 // Auth middleware for API routes — skip public endpoints
-const PUBLIC_API_PATHS = ['/health', '/csrf-token', '/auth/user', '/bot/log', '/bot/events', '/guide', '/privacy/status'];
+const PUBLIC_API_PATHS = ['/health', '/csrf-token', '/auth/user', '/bot/log', '/bot/events', '/guide', '/privacy/status', '/proxy/avatar', '/proxy/icon', '/proxy/avatar-default'];
 app.use('/api', (req, res, next) => {
     if (PUBLIC_API_PATHS.some(p => req.path === p || req.path.startsWith(p + '/'))) {
         return next();
@@ -213,6 +214,7 @@ app.use(fishingRoutes);
 app.use(botRoutes);
 app.use(guideRoutes);
 app.use(privacyRoutes);
+app.use(avatarProxyRoutes);
 
 // Realtime routes (not a Router — registers directly on app)
 registerRealtimeRoutes(app);

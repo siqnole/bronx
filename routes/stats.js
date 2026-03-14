@@ -4,10 +4,70 @@ const axios = require('axios');
 const router = express.Router();
 
 const { getDb } = require('../db');
+const { cache } = require('../cache');
 
 const DISCORD_API_BASE = 'https://discord.com/api/v10';
 
 // ── Utility ─────────────────────────────────────────────────────────────
+
+/**
+ * Resolve Discord member info (username, avatar) for a guild.
+ * Returns a Map of userId → { username, display_name, avatar, avatar_url, proxy_avatar_url }
+ * Uses cache to avoid spamming Discord API.
+ */
+async function resolveGuildMembers(guildId) {
+    const memberMap = {};
+    if (!guildId) return memberMap;
+    try {
+        const cacheKey = `discord:members:${guildId}`;
+        let members = await cache.get(cacheKey);
+        if (!members && process.env.DISCORD_TOKEN) {
+            const resp = await axios.get(`${DISCORD_API_BASE}/guilds/${guildId}/members?limit=1000`, {
+                headers: { Authorization: `Bot ${process.env.DISCORD_TOKEN}` }
+            });
+            members = resp.data.map(m => ({
+                id: m.user.id,
+                username: m.user.username,
+                display_name: m.nick || m.user.global_name || m.user.username,
+                avatar: m.user.avatar
+            }));
+            await cache.set(cacheKey, members, 60);
+        }
+        if (members) {
+            for (const m of members) {
+                memberMap[m.id] = {
+                    ...m,
+                    avatar_url: m.avatar
+                        ? `https://cdn.discordapp.com/avatars/${m.id}/${m.avatar}.${m.avatar.startsWith('a_') ? 'gif' : 'png'}?size=64`
+                        : `https://cdn.discordapp.com/embed/avatars/${(BigInt(m.id) >> 22n) % 6n}.png`,
+                    proxy_avatar_url: m.avatar
+                        ? `/api/proxy/avatar/${m.id}?hash=${m.avatar}&size=64`
+                        : `/api/proxy/avatar/${m.id}`
+                };
+            }
+        }
+    } catch (e) {
+        console.warn('resolveGuildMembers failed:', e.message);
+    }
+    return memberMap;
+}
+
+/**
+ * Enrich an array of objects that have a `user_id` field 
+ * with `username`, `avatar_url`, and `proxy_avatar_url`.
+ */
+function enrichWithMembers(rows, memberMap) {
+    return rows.map(row => {
+        const uid = String(row.user_id);
+        const member = memberMap[uid];
+        return {
+            ...row,
+            username: member?.display_name || member?.username || null,
+            avatar_url: member?.avatar_url || null,
+            proxy_avatar_url: member?.proxy_avatar_url || `/api/proxy/avatar/${uid}`
+        };
+    });
+}
 
 function timeAgo(date) {
     const now = new Date();
@@ -75,65 +135,120 @@ router.get('/api/stats/overview', async (req, res) => {
             }
         }
 
-        let economyValue = [{ total: 0 }];
-        let commandsToday = [{ count: 0 }];
-        let fishToday = [{ count: 0 }];
+        let economyTotal = 0;
+        let commandsTodayCount = 0;
+        let fishTodayCount = 0;
 
-        // Economy value: try server_users first, fall back to global users table
-        try {
-            const [ev] = await db.execute(
-                'SELECT COALESCE(SUM(wallet + bank), 0) as total FROM server_users WHERE guild_id = ?',
-                [guildId]
-            );
-            economyValue = ev;
-        } catch (e) {
+        // Economy value: try tables in order of preference (v2 → v1 → global)
+        // v2 migration drops server_users; the global `users` table is the source of truth
+        // We scope to guild members by fetching the member list from Discord
+        const tableExists = async (tableName) => {
             try {
-                const [ev] = await db.execute(
-                    'SELECT COALESCE(SUM(wallet + bank), 0) as total FROM users'
-                );
-                economyValue = ev;
-            } catch (e2) { console.warn('economy value query failed:', e2.message); }
-        }
+                const [rows] = await db.execute(`SELECT 1 FROM ${tableName} LIMIT 1`);
+                return true;
+            } catch { return false; }
+        };
 
-        // Commands today: try server_command_stats first, fall back to guild_command_usage (replicated to Aiven)
+        try {
+            // Try server_users first (v1 schema)
+            if (await tableExists('server_users')) {
+                const [ev] = await db.execute(
+                    'SELECT COALESCE(SUM(wallet + bank), 0) as total FROM server_users WHERE guild_id = ?',
+                    [guildId]
+                );
+                economyTotal = Number(ev[0]?.total || 0);
+            }
+            // If server_users returned 0 or doesn't exist, try global users table with member scoping
+            if (economyTotal === 0) {
+                // Fetch guild member IDs for scoping
+                let memberIds = null;
+                try {
+                    const { cache: appCache } = require('../cache');
+                    const cacheKey = `discord:member_ids:${guildId}`;
+                    memberIds = await appCache.get(cacheKey);
+                    if (!memberIds && process.env.DISCORD_TOKEN) {
+                        const resp = await axios.get(`${DISCORD_API_BASE}/guilds/${guildId}/members?limit=1000`, {
+                            headers: { Authorization: `Bot ${process.env.DISCORD_TOKEN}` }
+                        });
+                        memberIds = resp.data.map(m => m.user.id);
+                        await appCache.set(cacheKey, memberIds, 120);
+                    }
+                } catch (e) { console.warn('member fetch for economy scoping failed:', e.message); }
+
+                if (memberIds && memberIds.length > 0) {
+                    const placeholders = memberIds.map(() => '?').join(',');
+                    const [ev] = await db.execute(
+                        `SELECT COALESCE(SUM(wallet + COALESCE(bank, 0)), 0) as total FROM users WHERE user_id IN (${placeholders})`,
+                        memberIds
+                    );
+                    economyTotal = Number(ev[0]?.total || 0);
+                } else {
+                    // No member list available; fall back to all users
+                    const [ev] = await db.execute(
+                        'SELECT COALESCE(SUM(wallet + COALESCE(bank, 0)), 0) as total FROM users'
+                    );
+                    economyTotal = Number(ev[0]?.total || 0);
+                }
+            }
+        } catch (e) { console.warn('economy value query failed:', e.message); }
+
+        // Commands today: use guild_command_usage first (same table the 7-day trend chart uses)
+        // Then fall back to server_command_stats (v1) or command_stats
         try {
             const [guildCmds] = await db.execute(
-                'SELECT COUNT(*) as count FROM server_command_stats WHERE guild_id = ? AND used_at >= CURDATE()',
+                'SELECT COALESCE(SUM(use_count), 0) as count FROM guild_command_usage WHERE guild_id = ? AND usage_date = CURDATE()',
                 [guildId]
             );
-            commandsToday = guildCmds;
+            commandsTodayCount = Number(guildCmds[0]?.count || 0);
         } catch (e) {
             try {
                 const [guildCmds] = await db.execute(
-                    'SELECT COALESCE(SUM(use_count), 0) as count FROM guild_command_usage WHERE guild_id = ? AND usage_date = CURDATE()',
+                    'SELECT COUNT(*) as count FROM server_command_stats WHERE guild_id = ? AND used_at >= CURDATE()',
                     [guildId]
                 );
-                commandsToday = guildCmds;
-            } catch (e2) { console.warn('commands today query failed:', e2.message); }
+                commandsTodayCount = Number(guildCmds[0]?.count || 0);
+            } catch (e2) {
+                // Final fallback: command_stats table
+                try {
+                    const [rows] = await db.execute(
+                        'SELECT COUNT(*) as count FROM command_stats WHERE guild_id = ? AND used_at >= CURDATE()',
+                        [guildId]
+                    );
+                    commandsTodayCount = Number(rows[0]?.count || 0);
+                } catch (e3) { console.warn('commands today query failed:', e3.message); }
+            }
         }
 
-        // Fish today: try server_fish_catches first, fall back to fish_catches
+        // Fish today: try user_fish_catches (v2) → fish_catches (v1) → server_fish_catches (v1)
         try {
             const [guildFish] = await db.execute(
-                'SELECT COUNT(*) as count FROM server_fish_catches WHERE guild_id = ? AND caught_at >= CURDATE()',
+                'SELECT COUNT(*) as count FROM user_fish_catches WHERE guild_id = ? AND caught_at >= CURDATE()',
                 [guildId]
             );
-            fishToday = guildFish;
+            fishTodayCount = Number(guildFish[0]?.count || 0);
         } catch (e) {
             try {
                 const [guildFish] = await db.execute(
                     'SELECT COUNT(*) as count FROM fish_catches WHERE guild_id = ? AND caught_at >= CURDATE()',
                     [guildId]
                 );
-                fishToday = guildFish;
-            } catch (e2) { console.warn('fish today query failed:', e2.message); }
+                fishTodayCount = Number(guildFish[0]?.count || 0);
+            } catch (e2) {
+                try {
+                    const [guildFish] = await db.execute(
+                        'SELECT COUNT(*) as count FROM server_fish_catches WHERE guild_id = ? AND caught_at >= CURDATE()',
+                        [guildId]
+                    );
+                    fishTodayCount = Number(guildFish[0]?.count || 0);
+                } catch (e3) { console.warn('fish today query failed:', e3.message); }
+            }
         }
 
         res.json({
             memberCount,
-            totalEconomyValue: economyValue[0].total || 0,
-            commandsToday: commandsToday[0].count,
-            fishCaughtToday: fishToday[0].count
+            totalEconomyValue: economyTotal,
+            commandsToday: commandsTodayCount,
+            fishCaughtToday: fishTodayCount
         });
     } catch (error) {
         console.error('Overview stats error:', error);
@@ -260,54 +375,173 @@ router.get('/api/stats/overview/trend', async (req, res) => {
 
 // ── Recent Activity ─────────────────────────────────────────────────────
 
+// Format time as 12-hour with AM/PM (e.g., "9:45 PM")
+function formatTime12h(date) {
+    const d = new Date(date);
+    let hours = d.getHours();
+    const minutes = d.getMinutes().toString().padStart(2, '0');
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    hours = hours % 12;
+    hours = hours ? hours : 12; // 0 becomes 12
+    return `${hours}:${minutes} ${ampm}`;
+}
+
+// Build Discord avatar URL (or default avatar)
+function getAvatarUrl(userId, avatarHash) {
+    if (!userId) return '/assets/default-avatar.png';
+    if (avatarHash) {
+        const ext = avatarHash.startsWith('a_') ? 'gif' : 'png';
+        return `https://cdn.discordapp.com/avatars/${userId}/${avatarHash}.${ext}?size=64`;
+    }
+    // Default Discord avatar based on user ID
+    const defaultIndex = (BigInt(userId) >> BigInt(22)) % BigInt(6);
+    return `https://cdn.discordapp.com/embed/avatars/${defaultIndex}.png`;
+}
+
 router.get('/api/stats/recent-activity', async (req, res) => {
     try {
         const db = getDb();
         const guildId = req.guildId;
+        const limit = Math.min(parseInt(req.query.limit) || 5, 20);
 
         if (!guildId || guildId === 'global') return res.json([]);
 
-        let commandActivity = [];
-        let fishActivity = [];
+        // Try new guild_activity_log table first
+        let activities = [];
+        let usedNewTable = false;
 
         try {
-            [commandActivity] = await db.execute(`
-                SELECT 'terminal' as icon,
-                       CONCAT('Command used: ', command_name) as description,
-                       used_at as time
-                FROM command_stats
-                WHERE guild_id = ? AND used_at >= DATE_SUB(NOW(), INTERVAL 2 HOUR)
-                ORDER BY used_at DESC
-                LIMIT 3
-            `, [guildId]);
-        } catch (e) { console.warn('command activity query failed:', e.message); }
+            const [rows] = await db.execute(`
+                SELECT user_id, user_name, user_avatar, source, action, created_at
+                FROM guild_activity_log
+                WHERE guild_id = ? AND created_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
+                ORDER BY created_at DESC
+                LIMIT ?
+            `, [guildId, limit]);
 
-        try {
-            [fishActivity] = await db.execute(`
-                SELECT 'fish' as icon,
-                       CONCAT('Fish caught: ', COALESCE(fish_name, 'Unknown')) as description,
-                       caught_at as time
-                FROM fish_catches
-                WHERE guild_id = ? AND caught_at >= DATE_SUB(NOW(), INTERVAL 2 HOUR)
-                ORDER BY caught_at DESC
-                LIMIT 2
-            `, [guildId]);
-        } catch (e) { console.warn('fish activity query failed:', e.message); }
+            if (rows.length > 0) {
+                usedNewTable = true;
+                activities = rows.map(row => ({
+                    avatar: getAvatarUrl(row.user_id, row.user_avatar),
+                    time: formatTime12h(row.created_at),
+                    source: row.source, // 'DB' or 'DC'
+                    action: row.action,
+                    // Fallback icon for legacy frontend
+                    icon: row.source === 'DB' ? 'cog' : 'discord',
+                    description: row.action
+                }));
+            }
+        } catch (e) {
+            // Table might not exist yet — fall back to old behavior
+            if (!e.message.includes("doesn't exist")) {
+                console.warn('Activity log query failed:', e.message);
+            }
+        }
 
-        const allActivities = [...commandActivity, ...fishActivity]
-            .sort((a, b) => new Date(b.time) - new Date(a.time))
-            .slice(0, 5);
+        // Fallback to old behavior if no activity log entries
+        if (!usedNewTable) {
+            let commandActivity = [];
+            let fishActivity = [];
 
-        const formattedActivities = allActivities.map(activity => ({
-            icon: activity.icon,
-            description: activity.description,
-            time: timeAgo(activity.time)
-        }));
+            try {
+                [commandActivity] = await db.execute(`
+                    SELECT 'terminal' as icon,
+                           CONCAT('Command used: ', command_name) as description,
+                           used_at as time
+                    FROM command_stats
+                    WHERE guild_id = ? AND used_at >= DATE_SUB(NOW(), INTERVAL 2 HOUR)
+                    ORDER BY used_at DESC
+                    LIMIT 3
+                `, [guildId]);
+            } catch (e) { console.warn('command activity query failed:', e.message); }
 
-        res.json(formattedActivities);
+            try {
+                [fishActivity] = await db.execute(`
+                    SELECT 'fish' as icon,
+                           CONCAT('Fish caught: ', COALESCE(fish_name, 'Unknown')) as description,
+                           caught_at as time
+                    FROM fish_catches
+                    WHERE guild_id = ? AND caught_at >= DATE_SUB(NOW(), INTERVAL 2 HOUR)
+                    ORDER BY caught_at DESC
+                    LIMIT 2
+                `, [guildId]);
+            } catch (e) { console.warn('fish activity query failed:', e.message); }
+
+            const allActivities = [...commandActivity, ...fishActivity]
+                .sort((a, b) => new Date(b.time) - new Date(a.time))
+                .slice(0, limit);
+
+            activities = allActivities.map(activity => ({
+                icon: activity.icon,
+                description: activity.description,
+                time: timeAgo(activity.time),
+                // New format fields (empty for fallback)
+                avatar: null,
+                source: null,
+                action: activity.description
+            }));
+        }
+
+        res.json(activities);
     } catch (error) {
         console.error('Recent activity error:', error);
         res.status(500).json({ error: 'Failed to fetch recent activity' });
+    }
+});
+
+// Paginated activity for "See More" modal
+router.get('/api/stats/recent-activity/all', async (req, res) => {
+    try {
+        const db = getDb();
+        const guildId = req.guildId;
+        const page = Math.max(1, parseInt(req.query.page) || 1);
+        const limit = Math.min(parseInt(req.query.limit) || 20, 50);
+        const offset = (page - 1) * limit;
+
+        if (!guildId || guildId === 'global') {
+            return res.json({ activities: [], total: 0, page: 1, totalPages: 0 });
+        }
+
+        // Get total count
+        let total = 0;
+        try {
+            const [[{ cnt }]] = await db.execute(
+                `SELECT COUNT(*) as cnt FROM guild_activity_log WHERE guild_id = ?`,
+                [guildId]
+            );
+            total = cnt;
+        } catch (e) {
+            if (e.message.includes("doesn't exist")) {
+                return res.json({ activities: [], total: 0, page: 1, totalPages: 0 });
+            }
+            throw e;
+        }
+
+        // Get page data
+        const [rows] = await db.execute(`
+            SELECT user_id, user_name, user_avatar, source, action, created_at
+            FROM guild_activity_log
+            WHERE guild_id = ?
+            ORDER BY created_at DESC
+            LIMIT ? OFFSET ?
+        `, [guildId, limit, offset]);
+
+        const activities = rows.map(row => ({
+            avatar: getAvatarUrl(row.user_id, row.user_avatar),
+            time: formatTime12h(row.created_at),
+            source: row.source,
+            action: row.action
+        }));
+
+        res.json({
+            activities,
+            total,
+            page,
+            totalPages: Math.ceil(total / limit)
+        });
+    } catch (error) {
+        console.error('Paginated activity error:', error);
+        res.status(500).json({ error: 'Failed to fetch activity' });
     }
 });
 
@@ -615,33 +849,77 @@ router.get('/api/stats/economy', async (req, res) => {
         let gamblingOverview = { totalGames: 0, totalBet: 0, totalWon: 0, totalLost: 0, gameBreakdown: [] };
         
         // Try server-scoped tables first, fall back to global
+        // v2 migration drops server_users, so try users table with member scoping
+        let serverUsersExists = false;
         try {
-            const [overview] = await db.execute(
-                `SELECT COUNT(*) as user_count, 
-                        COALESCE(SUM(wallet),0) as total_wallet, 
-                        COALESCE(SUM(bank),0) as total_bank,
-                        COALESCE(SUM(wallet + COALESCE(bank,0)),0) as total_wealth
-                 FROM server_users WHERE guild_id = ?`, [guildId]
-            );
-            if (overview[0]) {
-                totalWealth = Number(overview[0].total_wealth);
-                totalWallet = Number(overview[0].total_wallet);
-                totalBank = Number(overview[0].total_bank);
-                userCount = Number(overview[0].user_count);
-            }
-        } catch (e) {
+            await db.execute('SELECT 1 FROM server_users LIMIT 1');
+            serverUsersExists = true;
+        } catch { /* table doesn't exist */ }
+        
+        if (serverUsersExists) {
             try {
                 const [overview] = await db.execute(
                     `SELECT COUNT(*) as user_count, 
                             COALESCE(SUM(wallet),0) as total_wallet, 
-                            COALESCE(SUM(bank),0) as total_bank
-                     FROM users WHERE wallet > 0 OR bank > 0`
+                            COALESCE(SUM(bank),0) as total_bank,
+                            COALESCE(SUM(wallet + COALESCE(bank,0)),0) as total_wealth
+                     FROM server_users WHERE guild_id = ?`, [guildId]
                 );
                 if (overview[0]) {
+                    totalWealth = Number(overview[0].total_wealth);
                     totalWallet = Number(overview[0].total_wallet);
                     totalBank = Number(overview[0].total_bank);
-                    totalWealth = totalWallet + totalBank;
                     userCount = Number(overview[0].user_count);
+                }
+            } catch (e) { console.warn('server_users economy failed:', e.message); }
+        }
+        
+        // If server_users didn't exist or returned 0, try global users with member scoping
+        if (totalWealth === 0) {
+            try {
+                // Get guild member IDs
+                let memberIds = null;
+                try {
+                    const { cache: memberCache } = require('../cache');
+                    const cacheKey = `discord:member_ids:${guildId}`;
+                    memberIds = await memberCache.get(cacheKey);
+                    if (!memberIds && process.env.DISCORD_TOKEN) {
+                        const resp = await axios.get(`${DISCORD_API_BASE}/guilds/${guildId}/members?limit=1000`, {
+                            headers: { Authorization: `Bot ${process.env.DISCORD_TOKEN}` }
+                        });
+                        memberIds = resp.data.map(m => m.user.id);
+                        await memberCache.set(cacheKey, memberIds, 120);
+                    }
+                } catch (me) { console.warn('member fetch for economy scoping:', me.message); }
+
+                if (memberIds && memberIds.length > 0) {
+                    const placeholders = memberIds.map(() => '?').join(',');
+                    const [overview] = await db.execute(
+                        `SELECT COUNT(*) as user_count, 
+                                COALESCE(SUM(wallet),0) as total_wallet, 
+                                COALESCE(SUM(bank),0) as total_bank
+                         FROM users WHERE (wallet > 0 OR bank > 0) AND user_id IN (${placeholders})`,
+                        memberIds
+                    );
+                    if (overview[0]) {
+                        totalWallet = Number(overview[0].total_wallet);
+                        totalBank = Number(overview[0].total_bank);
+                        totalWealth = totalWallet + totalBank;
+                        userCount = Number(overview[0].user_count);
+                    }
+                } else {
+                    const [overview] = await db.execute(
+                        `SELECT COUNT(*) as user_count, 
+                                COALESCE(SUM(wallet),0) as total_wallet, 
+                                COALESCE(SUM(bank),0) as total_bank
+                         FROM users WHERE wallet > 0 OR bank > 0`
+                    );
+                    if (overview[0]) {
+                        totalWallet = Number(overview[0].total_wallet);
+                        totalBank = Number(overview[0].total_bank);
+                        totalWealth = totalWallet + totalBank;
+                        userCount = Number(overview[0].user_count);
+                    }
                 }
             } catch (e2) { console.warn('economy overview failed:', e2.message); }
         }
@@ -655,12 +933,19 @@ router.get('/api/stats/economy', async (req, res) => {
                 { label: '100K-1M', min: 100000, max: 1000000 },
                 { label: '1M+', min: 1000000, max: 999999999999 }
             ];
+            // Determine which table to use
+            const wealthTable = serverUsersExists ? 'server_users' : 'users';
+            const wealthFilter = serverUsersExists
+                ? 'guild_id = ? AND'
+                : '';
+            const wealthCol = '(wallet + COALESCE(bank,0))';
             for (const b of brackets) {
                 try {
+                    const params = serverUsersExists ? [guildId, b.min, b.max] : [b.min, b.max];
                     const [rows] = await db.execute(
-                        `SELECT COUNT(*) as cnt FROM server_users 
-                         WHERE guild_id = ? AND (wallet + COALESCE(bank,0)) >= ? AND (wallet + COALESCE(bank,0)) < ?`,
-                        [guildId, b.min, b.max]
+                        `SELECT COUNT(*) as cnt FROM ${wealthTable} 
+                         WHERE ${wealthFilter} ${wealthCol} >= ? AND ${wealthCol} < ?`,
+                        params
                     );
                     wealthDistribution.push({ label: b.label, count: Number(rows[0]?.cnt || 0) });
                 } catch {
@@ -716,9 +1001,25 @@ router.get('/api/stats/fishing', async (req, res) => {
         let totalCaught = 0, totalValue = 0, uniqueFishers = 0;
         let rarityBreakdown = [], catchTrend = [], topFish = [];
         
-        // Try guild-scoped table first
-        const fishTable = 'server_fish_catches';
-        const guildFilter = `guild_id = '${guildId}'`;
+        // Try v2 table first, then v1 tables
+        let fishTable = 'user_fish_catches';
+        let guildFilter = `guild_id = '${guildId}'`;
+        let usingFallback = false;
+        
+        // Test if v2 table exists
+        try {
+            await db.execute(`SELECT 1 FROM user_fish_catches LIMIT 1`);
+        } catch {
+            // Try server_fish_catches (v1)
+            try {
+                await db.execute(`SELECT 1 FROM server_fish_catches LIMIT 1`);
+                fishTable = 'server_fish_catches';
+            } catch {
+                // Last resort: fish_catches (legacy)
+                fishTable = 'fish_catches';
+                usingFallback = true;
+            }
+        }
         
         try {
             const [overview] = await db.execute(
@@ -1031,16 +1332,56 @@ router.get('/api/stats/voice', async (req, res) => {
             }));
         } catch (e) { console.warn('recent sessions failed:', e.message); }
 
+        // Resolve user names for top users and recent sessions
+        const memberMap = await resolveGuildMembers(guildId);
+
+        // Resolve channel names from Discord
+        let channelMap = {};
+        try {
+            const channelCacheKey = `discord:channels:${guildId}`;
+            let channels = await cache.get(channelCacheKey);
+            if (!channels && process.env.DISCORD_TOKEN) {
+                const resp = await axios.get(`${DISCORD_API_BASE}/guilds/${guildId}/channels`, {
+                    headers: { Authorization: `Bot ${process.env.DISCORD_TOKEN}` }
+                });
+                channels = resp.data;
+                await cache.set(channelCacheKey, channels, 120);
+            }
+            if (channels) {
+                for (const ch of channels) channelMap[ch.id] = ch.name;
+            }
+        } catch (e) { console.warn('channel name resolution failed:', e.message); }
+
+        // Enrich top users
+        const enrichedTopUsers = topUsers.map(u => ({
+            ...u,
+            username: memberMap[u.user_id]?.display_name || memberMap[u.user_id]?.username || null,
+            proxy_avatar_url: memberMap[u.user_id]?.proxy_avatar_url || `/api/proxy/avatar/${u.user_id}`
+        }));
+
+        // Enrich top channels
+        const enrichedTopChannels = topChannels.map(ch => ({
+            ...ch,
+            channel_name: channelMap[ch.channel_id] || null
+        }));
+
+        // Enrich recent sessions
+        const enrichedRecentSessions = recentSessions.map(s => ({
+            ...s,
+            username: memberMap[s.user_id]?.display_name || memberMap[s.user_id]?.username || null,
+            channel_name: channelMap[s.channel_id] || null
+        }));
+
         res.json({
             totalSessions,
             uniqueUsers,
             totalMinutes,
             avgSessionMin,
             dailyVoice,
-            topChannels,
-            topUsers,
+            topChannels: enrichedTopChannels,
+            topUsers: enrichedTopUsers,
             peakHours,
-            recentSessions,
+            recentSessions: enrichedRecentSessions,
             range: `${days}d`
         });
     } catch (error) {
@@ -1110,7 +1451,19 @@ router.get('/api/stats/top-users', async (req, res) => {
             console.warn('top commands query failed:', e.message);
         }
 
-        res.json({ messages: topMessages, voice: topVoice, commands: topCommands });
+        // Resolve usernames for all user IDs
+        const allUserIds = new Set([
+            ...topMessages.map(u => u.user_id),
+            ...topVoice.map(u => u.user_id),
+            ...topCommands.map(u => u.user_id)
+        ]);
+        const memberMap = allUserIds.size > 0 ? await resolveGuildMembers(guildId) : {};
+
+        res.json({
+            messages: enrichWithMembers(topMessages, memberMap),
+            voice: enrichWithMembers(topVoice, memberMap),
+            commands: enrichWithMembers(topCommands, memberMap)
+        });
     } catch (error) {
         console.error('Top users error:', error);
         res.status(500).json({ error: 'Failed to fetch top users' });
@@ -1429,7 +1782,7 @@ router.get('/api/stats/export/:type', async (req, res) => {
 
 const ALLOWED_TABLES = new Set([
     'guild_command_usage', 'guild_daily_stats', 'guild_message_events', 'guild_member_events',
-    'server_users', 'server_fish_catches', 'server_xp', 'server_command_stats',
+    'server_users', 'server_fish_catches', 'user_xp', 'server_command_stats',
     'gambling_stats', 'leaderboard_cache'
 ]);
 

@@ -22,6 +22,16 @@ const C = {
     yellowFill: 'rgba(245,158,11,0.15)',
 };
 
+// Log transform helper - compresses large values while keeping small ones visible
+function logTransform(val) {
+    if (val <= 0) return 0;
+    return Math.log10(val + 1);
+}
+
+function logInverse(val) {
+    return Math.pow(10, val) - 1;
+}
+
 /**
  * Overview feature mixin
  */
@@ -50,7 +60,10 @@ export const OverviewMixin = {
         if (cards[0] && stats.memberCount !== undefined) {
             cards[0].textContent = stats.memberCount != null ? Number(stats.memberCount).toLocaleString() : '—';
         }
-        if (cards[1]) cards[1].textContent = '$' + formatNumber(parseFloat(stats.totalEconomyValue) || 0);
+        // Only update economy if we have a valid value (not null)
+        if (cards[1] && stats.totalEconomyValue !== null && stats.totalEconomyValue !== undefined) {
+            cards[1].textContent = '$' + formatNumber(parseFloat(stats.totalEconomyValue) || 0);
+        }
         if (cards[2]) cards[2].textContent = (stats.commandsToday ?? 0).toLocaleString();
         if (cards[3]) cards[3].textContent = (stats.fishCaughtToday ?? 0).toLocaleString();
     },
@@ -65,13 +78,56 @@ export const OverviewMixin = {
             return;
         }
 
-        activityList.innerHTML = activities.map(a => `
-            <div class="activity-item">
-                <i class="fas fa-${a.icon}"></i>
-                <span>${a.description}</span>
-                <span style="margin-left:auto;font-size:0.72rem;color:var(--fg-dim);">${a.time}</span>
+        activityList.innerHTML = activities.map(a => {
+            // New format with avatar, time, source, action
+            if (a.avatar && a.source) {
+                return `
+                    <div class="activity-item activity-item--rich">
+                        <img src="${a.avatar}" alt="" class="activity-avatar" onerror="this.src='/assets/default-avatar.png'">
+                        <span class="activity-time">${a.time}</span>
+                        <span class="activity-source"><em>${a.source}</em></span>
+                        <span class="activity-action">${a.action}</span>
+                    </div>
+                `;
+            }
+            // Legacy format fallback
+            return `
+                <div class="activity-item">
+                    <i class="fas fa-${a.icon || 'info-circle'}"></i>
+                    <span>${a.description || a.action}</span>
+                    <span style="margin-left:auto;font-size:0.72rem;color:var(--fg-dim);">${a.time}</span>
+                </div>
+            `;
+        }).join('');
+    },
+
+    // Show "See More" activity modal
+    async showActivityModal() {
+        const activityData = await this.apiCall('/stats/recent-activity/all?page=1&limit=20');
+        if (!activityData || !activityData.activities) {
+            this.toast('No activity data available', 'info');
+            return;
+        }
+
+        const modalContent = `
+            <div class="activity-modal-list">
+                ${activityData.activities.map(a => `
+                    <div class="activity-item activity-item--rich">
+                        <img src="${a.avatar}" alt="" class="activity-avatar" onerror="this.src='/assets/default-avatar.png'">
+                        <span class="activity-time">${a.time}</span>
+                        <span class="activity-source"><em>${a.source}</em></span>
+                        <span class="activity-action">${a.action}</span>
+                    </div>
+                `).join('')}
             </div>
-        `).join('');
+            ${activityData.totalPages > 1 ? `
+                <div class="activity-pagination">
+                    <span class="activity-page-info">Page 1 of ${activityData.totalPages}</span>
+                </div>
+            ` : ''}
+        `;
+
+        this.showModal('Recent Activity', modalContent);
     },
 
     // ── Overview Trend Chart ───────────────────────────────────
@@ -94,7 +150,7 @@ export const OverviewMixin = {
                 datasets: [
                     {
                         label: 'messages',
-                        data: data.messages || [],
+                        data: (data.messages || []).map(v => logTransform(v)),
                         borderColor: C.accent,
                         backgroundColor: C.accentFill,
                         fill: true,
@@ -105,7 +161,7 @@ export const OverviewMixin = {
                     },
                     {
                         label: 'active users',
-                        data: data.activeUsers || [],
+                        data: (data.activeUsers || []).map(v => logTransform(v)),
                         borderColor: C.cyan,
                         backgroundColor: C.cyanFill,
                         fill: true,
@@ -116,7 +172,7 @@ export const OverviewMixin = {
                     },
                     {
                         label: 'new members',
-                        data: data.newMembers || [],
+                        data: (data.newMembers || []).map(v => logTransform(v)),
                         borderColor: C.green,
                         backgroundColor: C.greenFill,
                         fill: true,
@@ -127,7 +183,7 @@ export const OverviewMixin = {
                     },
                     {
                         label: 'commands',
-                        data: data.commands || [],
+                        data: (data.commands || []).map(v => logTransform(v)),
                         borderColor: C.yellow,
                         backgroundColor: C.yellowFill,
                         fill: true,
@@ -162,7 +218,14 @@ export const OverviewMixin = {
                         borderColor: 'rgba(255,255,255,0.08)',
                         borderWidth: 1,
                         padding: 10,
-                        cornerRadius: 8
+                        cornerRadius: 8,
+                        itemSort: (a, b) => b.raw - a.raw,  // Sort by value, largest first
+                        callbacks: {
+                            label: (ctx) => {
+                                const original = Math.round(logInverse(ctx.raw));
+                                return `${ctx.dataset.label}: ${formatNumber(original)}`;
+                            }
+                        }
                     }
                 },
                 scales: {
@@ -171,7 +234,10 @@ export const OverviewMixin = {
                         grid: { color: C.grid }
                     },
                     y: {
-                        ticks: { color: C.tick },
+                        ticks: { 
+                            color: C.tick,
+                            callback: (value) => formatNumber(Math.round(logInverse(value)))
+                        },
                         grid: { color: C.grid },
                         beginAtZero: true
                     }

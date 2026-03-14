@@ -6,6 +6,7 @@ const router = express.Router();
 const { getDb } = require('../db');
 const { cache, CacheTTL } = require('../cache');
 const { requireGuildAccess, isValidSnowflake } = require('../security');
+const { logActivity, formatAction } = require('../activity-logger');
 
 const DISCORD_API_BASE = 'https://discord.com/api/v10';
 
@@ -149,6 +150,10 @@ router.put('/api/guild/settings', async (req, res) => {
             return res.status(400).json({ error: 'Cannot modify global settings' });
         }
 
+        // Get old settings for activity log
+        const [oldRows] = await db.execute('SELECT prefix FROM guild_settings WHERE guild_id = ?', [req.guildId]);
+        const oldPrefix = oldRows[0]?.prefix || 'b.';
+
         await db.execute(`
             INSERT INTO guild_settings (guild_id, prefix, logging_enabled, logging_channel)
             VALUES (?, ?, ?, ?)
@@ -157,6 +162,13 @@ router.put('/api/guild/settings', async (req, res) => {
             logging_enabled = VALUES(logging_enabled),
             logging_channel = VALUES(logging_channel)
         `, [req.guildId, prefix, logging_enabled, logging_channel]);
+
+        // Log activity if prefix changed
+        if (prefix && prefix !== oldPrefix) {
+            await logActivity(req.guildId, req.session?.user, 'DB',
+                formatAction('prefix', 'changed', prefix, { from: oldPrefix, to: prefix }),
+                { oldValue: oldPrefix, newValue: prefix });
+        }
 
         await cache.del(cache.key('guild', 'settings', req.guildId));
         res.json({ success: true });
@@ -183,7 +195,7 @@ router.get('/api/guild/blocked-channels', async (req, res) => {
 router.post('/api/guild/blocked-channels', async (req, res) => {
     try {
         const db = getDb();
-        const { channel_id } = req.body;
+        const { channel_id, channel_name } = req.body;
         const [rows] = await db.execute('SELECT blocked_channels FROM guild_settings WHERE guild_id = ?', [req.guildId]);
         let channels = rows[0]?.blocked_channels ? JSON.parse(rows[0].blocked_channels) : [];
         if (!channels.includes(channel_id)) channels.push(channel_id);
@@ -192,6 +204,12 @@ router.post('/api/guild/blocked-channels', async (req, res) => {
              ON DUPLICATE KEY UPDATE blocked_channels = VALUES(blocked_channels)`,
             [req.guildId, JSON.stringify(channels)]
         );
+
+        // Log activity
+        const displayName = channel_name || `#${channel_id}`;
+        await logActivity(req.guildId, req.session?.user, 'DB',
+            formatAction('channel', 'added', displayName) + ' to blocked list');
+
         res.json({ success: true });
     } catch (error) {
         console.error('Add blocked channel error:', error);
@@ -211,6 +229,11 @@ router.delete('/api/guild/blocked-channels/:channelId', async (req, res) => {
              ON DUPLICATE KEY UPDATE blocked_channels = VALUES(blocked_channels)`,
             [req.guildId, JSON.stringify(channels)]
         );
+
+        // Log activity
+        await logActivity(req.guildId, req.session?.user, 'DB',
+            formatAction('channel', 'removed', `#${channelId}`) + ' from blocked list');
+
         res.json({ success: true });
     } catch (error) {
         console.error('Remove blocked channel error:', error);
@@ -237,6 +260,11 @@ router.post('/api/guild/custom-prefixes', async (req, res) => {
         const { prefix } = req.body;
         if (!prefix) return res.status(400).json({ error: 'Prefix required' });
         await db.execute('INSERT IGNORE INTO guild_prefixes (guild_id, prefix) VALUES (?, ?)', [req.guildId, prefix]);
+
+        // Log activity
+        await logActivity(req.guildId, req.session?.user, 'DB',
+            formatAction('prefix', 'added', prefix));
+
         res.json({ success: true });
     } catch (error) {
         console.error('Add prefix error:', error);
@@ -249,6 +277,11 @@ router.delete('/api/guild/custom-prefixes', async (req, res) => {
         const db = getDb();
         const { prefix } = req.body;
         await db.execute('DELETE FROM guild_prefixes WHERE guild_id = ? AND prefix = ?', [req.guildId, prefix]);
+
+        // Log activity
+        await logActivity(req.guildId, req.session?.user, 'DB',
+            formatAction('prefix', 'removed', prefix));
+
         res.json({ success: true });
     } catch (error) {
         console.error('Remove prefix error:', error);
@@ -289,6 +322,10 @@ router.post('/api/modules/toggle', async (req, res) => {
             VALUES (?, ?, ?)
             ON DUPLICATE KEY UPDATE enabled = VALUES(enabled)
         `, [req.guildId, module, enabled]);
+
+        // Log activity
+        await logActivity(req.guildId, req.session?.user, 'DB',
+            formatAction('module', enabled ? 'enabled' : 'disabled', module));
 
         res.json({ success: true });
     } catch (error) {

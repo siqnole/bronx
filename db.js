@@ -313,7 +313,7 @@ async function initDatabase() {
             await db.execute("ALTER TABLE command_stats ADD COLUMN guild_id VARCHAR(32) NOT NULL DEFAULT 'global'");
         } catch (e) { /* column already exists */ }
         try {
-            await db.execute("ALTER TABLE fish_catches ADD COLUMN guild_id VARCHAR(32) NOT NULL DEFAULT 'global'");
+            await db.execute("ALTER TABLE user_fish_catches ADD COLUMN guild_id VARCHAR(32) NOT NULL DEFAULT 'global'");
         } catch (e) { /* column already exists */ }
 
         console.log('Dashboard tables verified/created');

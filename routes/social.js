@@ -4,6 +4,7 @@ const router = express.Router();
 
 const { getDb } = require('../db');
 const { requireGuildAccess, requireBotOwner, isValidSnowflake, validateSnowflake } = require('../security');
+const { logActivity, formatAction } = require('../activity-logger');
 
 // ── Users Search ────────────────────────────────────────────────────────
 
@@ -149,6 +150,10 @@ router.post('/api/giveaways', requireGuildAccess, async (req, res) => {
             VALUES (?, ?, ?, ?, ?, ?)
         `, [guildId, channel_id, prizeNum, maxWinnersNum, ends_at, req.session.user?.id || '0']);
 
+        // Log activity
+        await logActivity(guildId, req.session?.user, 'DB',
+            formatAction('giveaway', 'created', `$${prizeNum.toLocaleString()}`));
+
         res.json({ success: true, giveaway_id: result.insertId });
     } catch (error) {
         console.error('Giveaway creation error:', error);
@@ -205,6 +210,10 @@ router.delete('/api/giveaways/:id', requireGuildAccess, async (req, res) => {
         if (result.affectedRows === 0) {
             return res.status(404).json({ error: 'Giveaway not found or access denied' });
         }
+
+        // Log activity
+        await logActivity(guildId, req.session?.user, 'DB',
+            formatAction('giveaway', 'deleted', `#${id}`));
         
         res.json({ success: true });
     } catch (error) {
@@ -226,6 +235,10 @@ router.post('/api/giveaways/:id/end', requireGuildAccess, async (req, res) => {
         if (result.affectedRows === 0) {
             return res.status(404).json({ error: 'Giveaway not found or access denied' });
         }
+
+        // Log activity
+        await logActivity(guildId, req.session?.user, 'DB',
+            formatAction('giveaway', 'ended', `#${id}`));
         
         res.json({ success: true, message: 'Giveaway ended' });
     } catch (error) {
@@ -271,7 +284,7 @@ router.post('/api/autoroles', requireGuildAccess, async (req, res) => {
     try {
         const db = getDb();
         const guildId = req.guildId;
-        const { role_id } = req.body;
+        const { role_id, role_name } = req.body;
         
         if (!role_id || !isValidSnowflake(role_id)) {
             return res.status(400).json({ error: 'Valid role_id is required' });
@@ -287,6 +300,11 @@ router.post('/api/autoroles', requireGuildAccess, async (req, res) => {
         if (result.affectedRows === 0) {
             return res.status(409).json({ error: 'This role is already an autorole' });
         }
+
+        // Log activity
+        const displayName = role_name || `@${role_id}`;
+        await logActivity(guildId, req.session?.user, 'DB',
+            formatAction('autorole', 'added', displayName));
         
         res.json({ success: true, id: result.insertId });
     } catch (error) {
@@ -313,6 +331,10 @@ router.delete('/api/autoroles/:roleId', requireGuildAccess, async (req, res) => 
         if (result.affectedRows === 0) {
             return res.status(404).json({ error: 'Autorole not found' });
         }
+
+        // Log activity
+        await logActivity(guildId, req.session?.user, 'DB',
+            formatAction('autorole', 'removed', `@${roleId}`));
         
         res.json({ success: true });
     } catch (error) {
@@ -342,7 +364,7 @@ router.post('/api/reaction-roles', requireGuildAccess, async (req, res) => {
     try {
         const db = getDb();
         const guildId = req.guildId;
-        const { message_id, channel_id, emoji_raw, role_id } = req.body;
+        const { message_id, channel_id, emoji_raw, role_id, role_name } = req.body;
         
         if (message_id && !isValidSnowflake(message_id)) {
             return res.status(400).json({ error: 'Invalid message_id format' });
@@ -358,6 +380,12 @@ router.post('/api/reaction-roles', requireGuildAccess, async (req, res) => {
             INSERT INTO reaction_roles (guild_id, message_id, channel_id, emoji_raw, role_id)
             VALUES (?, ?, ?, ?, ?)
         `, [guildId, message_id, channel_id, emoji_raw, role_id]);
+
+        // Log activity
+        const displayEmoji = emoji_raw || '(emoji)';
+        const displayRole = role_name || `@${role_id}`;
+        await logActivity(guildId, req.session?.user, 'DB',
+            `Added <b>${displayEmoji}</b> → <b>${displayRole}</b> reaction role`);
 
         res.json({ success: true });
     } catch (error) {
@@ -423,6 +451,11 @@ router.delete('/api/reaction-roles/:message_id', requireGuildAccess, async (req,
         if (result.affectedRows === 0) {
             return res.status(404).json({ error: 'Reaction role not found or access denied' });
         }
+
+        // Log activity
+        const displayEmoji = emoji_raw || '';
+        await logActivity(guildId, req.session?.user, 'DB',
+            `Removed <b>${displayEmoji}</b> reaction role`);
         
         res.json({ success: true, deleted: result.affectedRows });
     } catch (error) {
@@ -476,17 +509,17 @@ router.get('/api/leaderboard/:type', requireGuildAccess, async (req, res) => {
         switch (type) {
             case 'xp':
                 query = `
-                    SELECT user_id, server_xp as value, server_level as level
-                    FROM server_xp WHERE guild_id = ? AND server_xp > 0 
-                    ORDER BY server_xp DESC LIMIT ${limit}
+                    SELECT user_id, total_xp as value, level
+                    FROM user_xp WHERE guild_id = ? AND total_xp > 0 
+                    ORDER BY total_xp DESC LIMIT ${limit}
                 `;
                 params = [guildId];
                 break;
             case 'level':
                 query = `
-                    SELECT user_id, server_level as value, server_xp as xp
-                    FROM server_xp WHERE guild_id = ? AND server_level > 1 
-                    ORDER BY server_level DESC, server_xp DESC LIMIT ${limit}
+                    SELECT user_id, level as value, total_xp as xp
+                    FROM user_xp WHERE guild_id = ? AND level > 1 
+                    ORDER BY level DESC, total_xp DESC LIMIT ${limit}
                 `;
                 params = [guildId];
                 break;
@@ -501,12 +534,26 @@ router.get('/api/leaderboard/:type', requireGuildAccess, async (req, res) => {
                 params = [...memberParams];
                 break;
             case 'fishing':
-                query = `
-                    SELECT user_id, SUM(value) as value, COUNT(*) as catch_count
-                    FROM fish_catches WHERE 1=1 ${memberFilter} GROUP BY user_id
-                    HAVING value > 0
-                    ORDER BY value DESC LIMIT ${limit}
-                `;
+                // Try user_fish_catches first (v2), then fish_catches (v1)
+                let fishingQuery;
+                try {
+                    await db.query('SELECT 1 FROM user_fish_catches LIMIT 1');
+                    fishingQuery = `
+                        SELECT user_id, SUM(value) as value, COUNT(*) as catch_count
+                        FROM user_fish_catches WHERE sold = FALSE ${memberFilter} GROUP BY user_id
+                        HAVING value > 0
+                        ORDER BY value DESC LIMIT ${limit}
+                    `;
+                } catch {
+                    // Fall back to fish_catches (no guild_id filter — use member scoping only)
+                    fishingQuery = `
+                        SELECT user_id, SUM(value) as value, COUNT(*) as catch_count
+                        FROM fish_catches WHERE 1=1 ${memberFilter} GROUP BY user_id
+                        HAVING value > 0
+                        ORDER BY value DESC LIMIT ${limit}
+                    `;
+                }
+                query = fishingQuery;
                 params = [...memberParams];
                 break;
             case 'gambling':
@@ -555,7 +602,7 @@ router.get('/api/leaderboard/:type', requireGuildAccess, async (req, res) => {
             console.error('Failed to resolve member names:', e.message);
         }
         
-        // Enrich rows with display names and avatar URLs
+        // Enrich rows with display names and avatar URLs (proxied to avoid cross-site cookie issues)
         const enriched = (rows || []).map(row => {
             const uid = String(row.user_id);
             const member = memberMap[uid];
@@ -564,7 +611,10 @@ router.get('/api/leaderboard/:type', requireGuildAccess, async (req, res) => {
                 username: member?.display_name || member?.username || null,
                 avatar_url: member?.avatar 
                     ? `https://cdn.discordapp.com/avatars/${uid}/${member.avatar}.${member.avatar.startsWith('a_') ? 'gif' : 'png'}?size=64`
-                    : `https://cdn.discordapp.com/embed/avatars/${(BigInt(uid) >> 22n) % 6n}.png`
+                    : `https://cdn.discordapp.com/embed/avatars/${(BigInt(uid) >> 22n) % 6n}.png`,
+                proxy_avatar_url: member?.avatar
+                    ? `/api/proxy/avatar/${uid}?hash=${member.avatar}&size=64`
+                    : `/api/proxy/avatar/${uid}`
             };
         });
         

@@ -23,8 +23,46 @@ const C = {
     palette:    ['#b4a7d6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#06b6d4', '#ec4899', '#14b8a6']
 };
 
-// shared chart.js scale defaults
+// Log transform helper - compresses large values while keeping small ones visible
+function logTransform(val) {
+    if (val <= 0) return 0;
+    return Math.log10(val + 1);  // +1 to handle values between 0-1
+}
+
+// Inverse for displaying original values in tooltips
+function logInverse(val) {
+    return Math.pow(10, val) - 1;
+}
+
+// shared chart.js scale defaults with log-transformed data
 function defaultScales() {
+    return {
+        x: { ticks: { color: C.tick, maxRotation: 0 }, grid: { color: C.grid } },
+        y: { 
+            ticks: { 
+                color: C.tick,
+                callback: (value) => formatNumber(Math.round(logInverse(value)))
+            }, 
+            grid: { color: C.grid },
+            beginAtZero: true
+        }
+    };
+}
+
+// Default tooltip that shows original (non-logged) values
+function logTooltipCallback() {
+    return {
+        callbacks: {
+            label: (ctx) => {
+                const original = Math.round(logInverse(ctx.raw));
+                return `${ctx.dataset.label}: ${formatNumber(original)}`;
+            }
+        }
+    };
+}
+
+// linear scale for stacked charts (log doesn't work well with stacking)
+function linearScales() {
     return {
         x: { ticks: { color: C.tick, maxRotation: 0 }, grid: { color: C.grid } },
         y: { ticks: { color: C.tick }, grid: { color: C.grid }, beginAtZero: true }
@@ -222,7 +260,7 @@ export const StatisticsMixin = {
                 }),
                 datasets: [{
                     label: 'commands',
-                    data: trend.map(d => d.count),
+                    data: trend.map(d => logTransform(d.count)),
                     borderColor: C.accent,
                     backgroundColor: C.accentFill,
                     fill: true,
@@ -235,7 +273,7 @@ export const StatisticsMixin = {
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
-                plugins: { legend: { display: false } },
+                plugins: { legend: { display: false }, tooltip: logTooltipCallback() },
                 scales: defaultScales()
             }
         });
@@ -254,7 +292,7 @@ export const StatisticsMixin = {
                 labels: top.map(c => c.command),
                 datasets: [{
                     label: 'uses',
-                    data: top.map(c => c.count),
+                    data: top.map(c => logTransform(c.count)),
                     backgroundColor: C.palette.slice(0, top.length),
                     borderWidth: 0,
                     borderRadius: 4,
@@ -265,9 +303,9 @@ export const StatisticsMixin = {
                 indexAxis: 'y',
                 responsive: true,
                 maintainAspectRatio: false,
-                plugins: { legend: { display: false } },
+                plugins: { legend: { display: false }, tooltip: logTooltipCallback() },
                 scales: {
-                    x: { ticks: { color: C.tick }, grid: { color: C.grid } },
+                    x: { ticks: { color: C.tick, callback: (v) => formatNumber(Math.round(logInverse(v))) }, grid: { color: C.grid } },
                     y: { ticks: { color: C.label, font: { family: 'system-ui, sans-serif' } }, grid: { display: false } }
                 }
             }
@@ -294,13 +332,13 @@ export const StatisticsMixin = {
             }
             list.innerHTML = data.map((u, i) => {
                 const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${i + 1}`;
-                const avatarUrl = u.avatar_url || `https://cdn.discordapp.com/embed/avatars/0.png`;
+                const avatarUrl = u.proxy_avatar_url || u.avatar_url || `/api/proxy/avatar/${u.user_id}`;
                 const displayName = u.username || u.user_id;
                 return `
                 <tr>
                     <td style="font-weight:600;">${medal}</td>
                     <td style="display:flex;align-items:center;gap:0.5rem;">
-                        <img src="${avatarUrl}" alt="" style="width:24px;height:24px;border-radius:50%;flex-shrink:0;" loading="lazy" onerror="this.src='https://cdn.discordapp.com/embed/avatars/0.png'">
+                        <img src="${avatarUrl}" alt="" style="width:24px;height:24px;border-radius:50%;flex-shrink:0;" loading="lazy" onerror="this.src='/api/proxy/avatar-default/0'">
                         <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${displayName}</span>
                     </td>
                     <td style="font-weight:500;">${this.formatNumber(u.value || 0)}</td>
@@ -356,8 +394,9 @@ export const StatisticsMixin = {
         this._setText('new-members-week', formatNumber(data.newMembersWeek || 0));
         this._setText('commands-today', formatNumber(data.commandsToday || 0));
 
-        // ── messages / day chart ──
-        this._setupMessagesChart(data.dailyMessages || []);
+        // ── messages / day chart ── (hidden - message tracking not fully implemented)
+        // this._setupMessagesChart(data.dailyMessages || []);
+        this._hideMessagesChart();
 
         // ── member growth chart ──
         this._setupMembersChart(data.dailyMembers || []);
@@ -366,7 +405,15 @@ export const StatisticsMixin = {
         this._setupActiveUsersChart(data.dailyActiveUsers || []);
     },
 
+    _hideMessagesChart() {
+        // Hide the messages chart container
+        const container = document.getElementById('activity-messages-chart')?.closest('.chart-container, .card');
+        if (container) container.style.display = 'none';
+    },
+
     _setupMessagesChart(rows) {
+        // Disabled - message tracking not fully implemented
+        return;
         if (typeof Chart === 'undefined') return;
         const ctx = document.getElementById('activity-messages-chart')?.getContext('2d');
         if (!ctx) return;
@@ -388,7 +435,7 @@ export const StatisticsMixin = {
                 responsive: true,
                 maintainAspectRatio: false,
                 plugins: { legend: { labels: { color: C.label, boxWidth: 12 } } },
-                scales: { ...defaultScales(), x: { ...defaultScales().x, stacked: true }, y: { ...defaultScales().y, stacked: true } }
+                scales: { ...linearScales(), x: { ...linearScales().x, stacked: true }, y: { ...linearScales().y, stacked: true } }
             }
         });
     },
@@ -406,14 +453,14 @@ export const StatisticsMixin = {
             data: {
                 labels,
                 datasets: [
-                    { label: 'joins', data: rows.map(r => r.joins), borderColor: C.green, backgroundColor: C.greenFill, fill: true, tension: 0.3, borderWidth: 2, pointRadius: 3 },
-                    { label: 'leaves', data: rows.map(r => r.leaves), borderColor: C.red, backgroundColor: C.redFill, fill: true, tension: 0.3, borderWidth: 2, pointRadius: 3 }
+                    { label: 'joins', data: rows.map(r => logTransform(r.joins)), borderColor: C.green, backgroundColor: C.greenFill, fill: true, tension: 0.3, borderWidth: 2, pointRadius: 3 },
+                    { label: 'leaves', data: rows.map(r => logTransform(r.leaves)), borderColor: C.red, backgroundColor: C.redFill, fill: true, tension: 0.3, borderWidth: 2, pointRadius: 3 }
                 ]
             },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
-                plugins: { legend: { labels: { color: C.label, boxWidth: 12 } } },
+                plugins: { legend: { labels: { color: C.label, boxWidth: 12 } }, tooltip: logTooltipCallback() },
                 scales: defaultScales()
             }
         });
@@ -433,7 +480,7 @@ export const StatisticsMixin = {
                 labels,
                 datasets: [{
                     label: 'active users',
-                    data: rows.map(r => r.count),
+                    data: rows.map(r => logTransform(r.count)),
                     borderColor: C.cyan,
                     backgroundColor: C.cyanFill,
                     fill: true,
@@ -446,7 +493,7 @@ export const StatisticsMixin = {
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
-                plugins: { legend: { display: false } },
+                plugins: { legend: { display: false }, tooltip: logTooltipCallback() },
                 scales: defaultScales()
             }
         });
@@ -494,7 +541,7 @@ export const StatisticsMixin = {
                 labels,
                 datasets: [{
                     label: 'catches',
-                    data: trend.map(d => d.count),
+                    data: trend.map(d => logTransform(d.count)),
                     borderColor: C.blue,
                     backgroundColor: C.blueFill,
                     fill: true,
@@ -504,7 +551,7 @@ export const StatisticsMixin = {
                     pointBackgroundColor: C.blue
                 }, {
                     label: 'value',
-                    data: trend.map(d => d.value),
+                    data: trend.map(d => logTransform(d.value)),
                     borderColor: C.green,
                     backgroundColor: 'transparent',
                     fill: false,
@@ -518,10 +565,10 @@ export const StatisticsMixin = {
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
-                plugins: { legend: { labels: { color: C.label, boxWidth: 12 } } },
+                plugins: { legend: { labels: { color: C.label, boxWidth: 12 } }, tooltip: logTooltipCallback() },
                 scales: {
                     ...defaultScales(),
-                    y1: { position: 'right', ticks: { color: C.tick }, grid: { display: false }, beginAtZero: true }
+                    y1: { position: 'right', ticks: { color: C.tick, callback: (v) => formatNumber(Math.round(logInverse(v))) }, grid: { display: false }, beginAtZero: true }
                 }
             }
         });
@@ -617,7 +664,7 @@ export const StatisticsMixin = {
                 labels: dist.map(d => d.bracket),
                 datasets: [{
                     label: 'users',
-                    data: dist.map(d => d.count),
+                    data: dist.map(d => logTransform(d.count)),
                     backgroundColor: C.palette.slice(0, dist.length),
                     borderWidth: 0,
                     borderRadius: 4,
@@ -627,7 +674,7 @@ export const StatisticsMixin = {
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
-                plugins: { legend: { display: false } },
+                plugins: { legend: { display: false }, tooltip: logTooltipCallback() },
                 scales: defaultScales()
             }
         });
@@ -727,7 +774,7 @@ export const StatisticsMixin = {
                 responsive: true,
                 maintainAspectRatio: false,
                 plugins: { legend: { display: false } },
-                scales: defaultScales()
+                scales: linearScales()  // P&L has signed values, keep linear
             }
         });
     },
@@ -803,7 +850,7 @@ export const StatisticsMixin = {
                 datasets: [
                     {
                         label: 'joins',
-                        data: rows.map(r => r.joins),
+                        data: rows.map(r => logTransform(r.joins)),
                         borderColor: C.green,
                         backgroundColor: C.greenFill,
                         fill: true,
@@ -814,7 +861,7 @@ export const StatisticsMixin = {
                     },
                     {
                         label: 'leaves',
-                        data: rows.map(r => r.leaves),
+                        data: rows.map(r => logTransform(r.leaves)),
                         borderColor: C.red,
                         backgroundColor: C.redFill,
                         fill: true,
@@ -828,7 +875,7 @@ export const StatisticsMixin = {
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
-                plugins: { legend: { labels: { color: C.label, boxWidth: 12 } } },
+                plugins: { legend: { labels: { color: C.label, boxWidth: 12 } }, tooltip: logTooltipCallback() },
                 scales: defaultScales()
             }
         });
@@ -893,7 +940,7 @@ export const StatisticsMixin = {
 
         tbody.innerHTML = channels.map((ch, i) => {
             const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}`;
-            const channelName = this.resolveChannelName ? this.resolveChannelName(ch.channel_id) : `<#${ch.channel_id}>`;
+            const channelName = ch.channel_name ? `#${ch.channel_name}` : `<#${ch.channel_id}>`;
             return `<tr>
                 <td style="text-align:center;">${medal}</td>
                 <td>${channelName}</td>
@@ -918,10 +965,11 @@ export const StatisticsMixin = {
 
         tbody.innerHTML = users.map((u, i) => {
             const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}`;
-            const userName = this.resolveUserName ? this.resolveUserName(u.user_id) : `<@${u.user_id}>`;
+            const userName = u.username || `User#${String(u.user_id).slice(-4)}`;
+            const avatarUrl = u.proxy_avatar_url || `/api/proxy/avatar/${u.user_id}`;
             return `<tr>
                 <td style="text-align:center;">${medal}</td>
-                <td>${userName}</td>
+                <td style="display:flex;align-items:center;gap:0.5rem;"><img src="${avatarUrl}" alt="" style="width:20px;height:20px;border-radius:50%;" onerror="this.src='/api/proxy/avatar-default/0'">${userName}</td>
                 <td>${formatNumber(u.sessions)}</td>
                 <td>${formatNumber(u.channels_used)}</td>
                 <td>${this._formatDuration(u.total_minutes)}</td>
@@ -942,8 +990,8 @@ export const StatisticsMixin = {
         if (empty) empty.style.display = 'none';
 
         tbody.innerHTML = sessions.map(s => {
-            const userName = this.resolveUserName ? this.resolveUserName(s.user_id) : `<@${s.user_id}>`;
-            const channelName = this.resolveChannelName ? this.resolveChannelName(s.channel_id) : `<#${s.channel_id}>`;
+            const userName = s.username || `User#${String(s.user_id).slice(-4)}`;
+            const channelName = s.channel_name || `<#${s.channel_id}>`;
             const joinTime = timeAgo(s.join_time);
             let duration = '—';
             if (s.duration_sec !== null && s.duration_sec > 0) {
@@ -998,21 +1046,25 @@ export const StatisticsMixin = {
         if (!data || data.error) return;
 
         const medals = ['🥇', '🥈', '🥉'];
-        const resolveUser = (id) => this.resolveUserName ? this.resolveUserName(id) : `User#${id}`;
+        const getUserDisplay = (u) => {
+            const name = u.username || `User#${String(u.user_id).slice(-4)}`;
+            const avatarUrl = u.proxy_avatar_url || `/api/proxy/avatar/${u.user_id}`;
+            return `<span style="display:flex;align-items:center;gap:0.4rem;"><img src="${avatarUrl}" style="width:20px;height:20px;border-radius:50%;" onerror="this.src='/api/proxy/avatar-default/0'">${name}</span>`;
+        };
 
         // Messages table
         this._renderTopTable('top-messages-tbody', 'top-messages-empty', data.messages || [], (u, i) =>
-            `<tr><td>${medals[i] || (i + 1)}</td><td>${resolveUser(u.user_id)}</td><td>${formatNumber(u.total)}</td></tr>`
+            `<tr><td>${medals[i] || (i + 1)}</td><td>${getUserDisplay(u)}</td><td>${formatNumber(u.total)}</td></tr>`
         );
 
         // VC table
         this._renderTopTable('top-vc-tbody', 'top-vc-empty', data.voice || [], (u, i) =>
-            `<tr><td>${medals[i] || (i + 1)}</td><td>${resolveUser(u.user_id)}</td><td>${this._formatDuration(u.total)}</td></tr>`
+            `<tr><td>${medals[i] || (i + 1)}</td><td>${getUserDisplay(u)}</td><td>${this._formatDuration(u.total)}</td></tr>`
         );
 
         // Commands table
         this._renderTopTable('top-cmds-tbody', 'top-cmds-empty', data.commands || [], (u, i) =>
-            `<tr><td>${medals[i] || (i + 1)}</td><td>${resolveUser(u.user_id)}</td><td>${formatNumber(u.total)}</td></tr>`
+            `<tr><td>${medals[i] || (i + 1)}</td><td>${getUserDisplay(u)}</td><td>${formatNumber(u.total)}</td></tr>`
         );
 
         // Message distribution pie chart
@@ -1043,8 +1095,7 @@ export const StatisticsMixin = {
 
         if (this.charts[canvasId]) { this.charts[canvasId].destroy(); delete this.charts[canvasId]; }
 
-        const resolveUser = (id) => this.resolveUserName ? this.resolveUserName(id) : `User#${String(id).slice(-4)}`;
-        const labels = items.map(u => resolveUser(u.user_id));
+        const labels = items.map(u => u.username || `User#${String(u.user_id).slice(-4)}`);
         const values = items.map(u => u.total);
         const colors = items.map((_, i) => C.palette[i % C.palette.length]);
 
@@ -1076,13 +1127,13 @@ export const StatisticsMixin = {
                 type: 'bar',
                 data: {
                     labels,
-                    datasets: [{ label, data: values, backgroundColor: colors, borderRadius: 6, maxBarThickness: 40 }]
+                    datasets: [{ label, data: values.map(v => logTransform(v)), backgroundColor: colors, borderRadius: 6, maxBarThickness: 40 }]
                 },
                 options: {
                     responsive: true, maintainAspectRatio: false, indexAxis: 'y',
-                    plugins: { legend: { display: false } },
+                    plugins: { legend: { display: false }, tooltip: logTooltipCallback() },
                     scales: {
-                        x: { ticks: { color: C.tick }, grid: { color: C.grid }, beginAtZero: true },
+                        x: { ticks: { color: C.tick, callback: (v) => formatNumber(Math.round(logInverse(v))) }, grid: { color: C.grid }, beginAtZero: true },
                         y: { ticks: { color: C.tick }, grid: { display: false } }
                     }
                 }
@@ -1091,11 +1142,11 @@ export const StatisticsMixin = {
             this.charts[canvasId] = new Chart(canvas, {
                 type: type === 'line' ? 'line' : 'pie',
                 data: type === 'line'
-                    ? { labels, datasets: [{ label, data: values, borderColor: C.accent, backgroundColor: C.accentFill, tension: 0.3, fill: true }] }
+                    ? { labels, datasets: [{ label, data: values.map(v => logTransform(v)), borderColor: C.accent, backgroundColor: C.accentFill, tension: 0.3, fill: true }] }
                     : { labels, datasets: [{ data: values, backgroundColor: colors }] },
                 options: {
                     responsive: true, maintainAspectRatio: false,
-                    plugins: { legend: { position: type === 'line' ? 'top' : 'right', labels: { color: C.tick, boxWidth: 12 } } },
+                    plugins: { legend: { position: type === 'line' ? 'top' : 'right', labels: { color: C.tick, boxWidth: 12 } }, ...(type === 'line' ? { tooltip: logTooltipCallback() } : {}) },
                     ...(type === 'line' ? { scales: defaultScales() } : {})
                 }
             });
@@ -1264,9 +1315,9 @@ export const StatisticsMixin = {
         canvas._multiData = {
             labels,
             datasets: [
-                { label: 'messages', data: daily.map(d => d.messages), borderColor: C.accent, backgroundColor: C.accentFill, tension: 0.3, fill: true },
-                { label: 'commands', data: daily.map(d => d.commands), borderColor: C.green, backgroundColor: C.greenFill, tension: 0.3, fill: true },
-                { label: 'VC mins', data: daily.map(d => d.voice_minutes), borderColor: C.cyan, backgroundColor: C.cyanFill, tension: 0.3, fill: true }
+                { label: 'messages', data: daily.map(d => logTransform(d.messages)), borderColor: C.accent, backgroundColor: C.accentFill, tension: 0.3, fill: true },
+                { label: 'commands', data: daily.map(d => logTransform(d.commands)), borderColor: C.green, backgroundColor: C.greenFill, tension: 0.3, fill: true },
+                { label: 'VC mins', data: daily.map(d => logTransform(d.voice_minutes)), borderColor: C.cyan, backgroundColor: C.cyanFill, tension: 0.3, fill: true }
             ]
         };
 
@@ -1279,7 +1330,7 @@ export const StatisticsMixin = {
             },
             options: {
                 responsive: true, maintainAspectRatio: false,
-                plugins: { legend: { labels: { color: C.tick } } },
+                plugins: { legend: { labels: { color: C.tick } }, tooltip: logTooltipCallback() },
                 scales: defaultScales()
             }
         });

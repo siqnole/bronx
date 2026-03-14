@@ -14,6 +14,27 @@
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" rel="stylesheet">
 </head>
 <body>
+    <!-- Loading Splash Screen -->
+    <div id="loading-splash">
+        <div class="splash-content">
+            <div class="splash-brand-row">
+                <span class="splash-brand">bronx</span>
+                <span class="splash-beta-badge">beta</span>
+            </div>
+            <div class="splash-spinner"></div>
+            <p class="splash-message">loading your dashboard...</p>
+            <p class="splash-sub">this dashboard is currently in beta</p>
+            <div class="splash-links">
+                <a href="https://discord.gg/bronx" target="_blank" rel="noopener noreferrer" title="Discord">
+                    <i class="fab fa-discord"></i>
+                </a>
+                <a href="https://github.com/siqnole/bronx/tree/main" target="_blank" rel="noopener noreferrer" title="GitHub">
+                    <i class="fab fa-github"></i>
+                </a>
+            </div>
+        </div>
+    </div>
+
     <!-- Command Palette (Cmd+K) -->
     <div class="cmd-palette-overlay" id="cmd-palette-overlay">
         <div class="cmd-palette">
@@ -276,7 +297,7 @@
 
                         <div class="card"><div class="card-header"><h3 class="card-title"><i class="fas fa-chart-area"></i> 7-day overview</h3></div><div class="card-body"><div class="chart-container" style="height:280px;"><canvas id="overview-trend-chart"></canvas></div></div></div>
 
-                        <div class="card"><div class="card-header"><h3 class="card-title"><i class="fas fa-stream"></i> recent activity</h3><span class="card-badge">live</span></div><div class="card-body"><div class="activity-list"><div class="activity-item activity-empty"><i class="fas fa-info-circle"></i><span>no recent activity in this server</span></div></div></div></div>
+                        <div class="card"><div class="card-header"><h3 class="card-title"><i class="fas fa-stream"></i> recent activity</h3><span class="card-badge">live</span></div><div class="card-body"><div class="activity-list"><div class="activity-item activity-empty"><i class="fas fa-info-circle"></i><span>no recent activity in this server</span></div></div><div class="activity-see-more"><button onclick="dashboard.showActivityModal()"><i class="fas fa-chevron-down"></i> see more</button></div></div></div>
                     </div>
                 </section>
 

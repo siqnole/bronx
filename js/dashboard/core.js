@@ -75,6 +75,13 @@ class BronxBotDashboard {
             window.location.href = '/servers';
             return;
         }
+
+        // Dismiss loading splash
+        const splash = document.getElementById('loading-splash');
+        if (splash) {
+            splash.classList.add('hidden');
+            splash.addEventListener('transitionend', () => splash.remove(), { once: true });
+        }
     }
 
     // ── Authentication ─────────────────────────────────────────
@@ -122,9 +129,9 @@ class BronxBotDashboard {
         const userName = document.getElementById('user-name');
 
         if (this.user.avatar) {
-            avatar.src = `https://cdn.discordapp.com/avatars/${this.user.id}/${this.user.avatar}.png?size=64`;
+            avatar.src = `/api/proxy/avatar/${this.user.id}?hash=${this.user.avatar}&size=64`;
         } else {
-            avatar.src = 'https://cdn.discordapp.com/embed/avatars/0.png';
+            avatar.src = `/api/proxy/avatar/${this.user.id}`;
         }
         userName.textContent = this.user.global_name || this.user.username;
     }
@@ -139,7 +146,7 @@ class BronxBotDashboard {
         if (identityWrap) identityWrap.style.display = 'flex';
         if (identityIcon) {
             if (guild.icon) {
-                identityIcon.innerHTML = `<img src="https://cdn.discordapp.com/icons/${guild.id}/${guild.icon}.png?size=64" alt="">`;
+                identityIcon.innerHTML = `<img src="/api/proxy/icon/${guild.id}?hash=${guild.icon}&size=64" alt="">`;
             } else {
                 identityIcon.innerHTML = `<span>${(guild.name || '?').charAt(0)}</span>`;
             }
