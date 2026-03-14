@@ -329,7 +329,7 @@ export const StatisticsMixin = {
 
     // ── Leaderboard Data ───────────────────────────────────────
     _lbPage: 1,
-    _lbPageSize: 50,
+    _lbPageSize: 15,
     _lbRetryTimer: null,
     _lbRetryCount: 0,
     _lbMaxRetries: 10,
@@ -472,9 +472,8 @@ export const StatisticsMixin = {
         this._setText('new-members-week', formatNumber(data.newMembersWeek || 0));
         this._setText('commands-today', formatNumber(data.commandsToday || 0));
 
-        // ── messages / day chart ── (hidden - message tracking not fully implemented)
-        // this._setupMessagesChart(data.dailyMessages || []);
-        this._hideMessagesChart();
+        // ── messages / day chart ──
+        this._setupMessagesChart(data.dailyMessages || []);
 
         // ── member growth chart ──
         this._setupMembersChart(data.dailyMembers || []);
@@ -490,9 +489,10 @@ export const StatisticsMixin = {
     },
 
     _setupMessagesChart(rows) {
-        // Disabled - message tracking not fully implemented
-        return;
         if (typeof Chart === 'undefined') return;
+        // Ensure container is visible (may have been hidden previously)
+        const container = document.getElementById('activity-messages-chart')?.closest('.chart-container, .card');
+        if (container) container.style.display = '';
         const ctx = document.getElementById('activity-messages-chart')?.getContext('2d');
         if (!ctx) return;
         if (this.charts.activityMessages) this.charts.activityMessages.destroy();

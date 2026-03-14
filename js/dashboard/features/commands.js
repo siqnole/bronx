@@ -221,18 +221,23 @@ export const CommandsMixin = {
             </div>
         `;
 
+        // Build map of original command states so we only send changes
+        const originalCmdStates = {};
+        (settings.commands || []).forEach(cmd => { originalCmdStates[cmd.name] = !!cmd.enabled; });
+
         this.showModal(`${moduleName} Settings`, modalContent, async () => {
             const enabled = document.getElementById('modal-mod-enabled')?.checked;
             const scopes = this.collectScopesFromModal();
             
-            // Collect command states
+            // Only collect commands whose state actually changed
             const cmdToggles = document.querySelectorAll('.module-commands-list [data-cmd]');
             const cmdUpdates = [];
             cmdToggles.forEach(toggle => {
-                cmdUpdates.push({
-                    command: toggle.dataset.cmd,
-                    enabled: toggle.checked
-                });
+                const name = toggle.dataset.cmd;
+                const nowEnabled = toggle.checked;
+                if (nowEnabled !== originalCmdStates[name]) {
+                    cmdUpdates.push({ command: name, enabled: nowEnabled });
+                }
             });
 
             // Save module settings
@@ -241,12 +246,14 @@ export const CommandsMixin = {
                 body: JSON.stringify({ enabled, scopes })
             });
 
-            // Save individual command states
-            for (const update of cmdUpdates) {
-                await this.apiCall('/commands/toggle', {
-                    method: 'POST',
-                    body: JSON.stringify(update)
-                });
+            // Save only changed command states (batched in parallel)
+            if (cmdUpdates.length > 0) {
+                await Promise.all(cmdUpdates.map(update =>
+                    this.apiCall('/commands/toggle', {
+                        method: 'POST',
+                        body: JSON.stringify(update)
+                    })
+                ));
             }
 
             this.closeModal();

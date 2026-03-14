@@ -674,7 +674,7 @@ router.get('/api/leaderboard/:type', requireGuildAccess, async (req, res) => {
         const db = getDb();
         const guildId = req.guildId;
         const { type } = req.params;
-        const limit = Math.min(parseInt(req.query.limit) || 50, 100);
+        const limit = Math.min(parseInt(req.query.limit) || 15, 50);
         const offset = Math.max(parseInt(req.query.offset) || 0, 0);
         
         let query = '';
@@ -701,11 +701,13 @@ router.get('/api/leaderboard/:type', requireGuildAccess, async (req, res) => {
             case 'balance':
             case 'networth':
                 query = `
-                    SELECT user_id, wallet + COALESCE(bank, 0) as value, wallet, bank
-                    FROM users WHERE (wallet > 0 OR bank > 0)
-                    ORDER BY (wallet + COALESCE(bank, 0)) DESC LIMIT ${limit} OFFSET ${offset}
+                    SELECT u.user_id, u.wallet + COALESCE(u.bank, 0) as value, u.wallet, u.bank
+                    FROM users u
+                    INNER JOIN server_xp sx ON sx.user_id = u.user_id AND sx.guild_id = ?
+                    WHERE (u.wallet > 0 OR u.bank > 0)
+                    ORDER BY (u.wallet + COALESCE(u.bank, 0)) DESC LIMIT ${limit} OFFSET ${offset}
                 `;
-                params = [];
+                params = [guildId];
                 break;
             case 'fishing':
                 // Try user_fish_catches first (v2), then fish_catches (v1)
@@ -739,8 +741,19 @@ router.get('/api/leaderboard/:type', requireGuildAccess, async (req, res) => {
                 `;
                 params = [];
                 break;
+            case 'messages':
+                query = `
+                    SELECT user_id, COUNT(*) as value
+                    FROM guild_message_events
+                    WHERE guild_id = ? AND event_type = 'message' AND user_id > 0
+                    GROUP BY user_id
+                    HAVING value > 0
+                    ORDER BY value DESC LIMIT ${limit} OFFSET ${offset}
+                `;
+                params = [guildId];
+                break;
             default:
-                return res.status(400).json({ error: 'Invalid leaderboard type. Valid: xp, level, coins, fishing, gambling' });
+                return res.status(400).json({ error: 'Invalid leaderboard type. Valid: xp, level, coins, fishing, gambling, messages' });
         }
         
         const [rows] = params.length > 0 

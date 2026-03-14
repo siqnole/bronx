@@ -135,9 +135,8 @@ app.use('/api', trackApiCalls);
 
 // ── Page routes ─────────────────────────────────────────────────────────
 
-// Serve landing page for unauthenticated users, redirect to /servers for logged-in users
+// Serve landing page for all users
 app.get('/', (req, res) => {
-    if (req.session?.user) return res.redirect('/servers');
     res.sendFile(path.join(__dirname, 'html/index.html'));
 });
 
