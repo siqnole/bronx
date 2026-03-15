@@ -149,7 +149,7 @@ export const ModerationMixin = {
         const userFilter = document.getElementById('infraction-filter-user')?.value.trim() || '';
         const activeOnly = document.getElementById('infraction-filter-active')?.checked || false;
 
-        let url = `/api/moderation/infractions?page=${page}&limit=25`;
+        let url = `/moderation/infractions?page=${page}&limit=25`;
         if (typeFilter) url += `&type=${encodeURIComponent(typeFilter)}`;
         if (userFilter) url += `&user_id=${encodeURIComponent(userFilter)}`;
         if (activeOnly) url += `&active=true`;
@@ -234,7 +234,7 @@ export const ModerationMixin = {
 
     async viewInfractionDetail(caseNumber) {
         const esc = (s) => this.escapeHtml ? this.escapeHtml(s) : this._escapeHtml(s);
-        const inf = await this.apiCall(`/api/moderation/infractions/${caseNumber}`);
+        const inf = await this.apiCall(`/moderation/infractions/${caseNumber}`);
         if (!inf) return;
 
         const dateStr = inf.created_at ? new Date(inf.created_at).toLocaleString() : '—';
@@ -269,7 +269,7 @@ export const ModerationMixin = {
             </div>
         `, async () => {
             const reason = document.getElementById('modal-pardon-reason')?.value.trim();
-            const res = await this.apiCall(`/api/moderation/infractions/${caseNumber}/pardon`, {
+            const res = await this.apiCall(`/moderation/infractions/${caseNumber}/pardon`, {
                 method: 'POST',
                 body: JSON.stringify({ reason }),
             });
@@ -286,7 +286,7 @@ export const ModerationMixin = {
     // ── Infraction Config ──────────────────────────────────────
     async loadInfractionConfig() {
         const esc = (s) => this.escapeHtml ? this.escapeHtml(s) : this._escapeHtml(s);
-        const config = await this.apiCall('/api/moderation/config');
+        const config = await this.apiCall('/moderation/config');
         const container = document.getElementById('infraction-config-container');
         if (!container || !config) return;
 
@@ -375,7 +375,7 @@ export const ModerationMixin = {
             defaultDurations[el.dataset.type] = el.value.trim();
         });
 
-        const res = await this.apiCall('/api/moderation/config', {
+        const res = await this.apiCall('/moderation/config', {
             method: 'POST',
             body: JSON.stringify({
                 point_values: pointValues,
@@ -393,7 +393,7 @@ export const ModerationMixin = {
     // ── Automod Config ─────────────────────────────────────────
     async loadAutomodConfig() {
         const esc = (s) => this.escapeHtml ? this.escapeHtml(s) : this._escapeHtml(s);
-        const config = await this.apiCall('/api/moderation/automod');
+        const config = await this.apiCall('/moderation/automod');
         const container = document.getElementById('automod-config-container');
         if (!container || !config) return;
 
@@ -458,7 +458,7 @@ export const ModerationMixin = {
             config[feature][fieldName] = field.type === 'checkbox' ? field.checked : field.value;
         });
 
-        const res = await this.apiCall('/api/moderation/automod', {
+        const res = await this.apiCall('/moderation/automod', {
             method: 'POST',
             body: JSON.stringify(config),
         });
@@ -472,7 +472,7 @@ export const ModerationMixin = {
     // ── Role Classes ───────────────────────────────────────────
     async loadRoleClassesData() {
         const esc = (s) => this.escapeHtml ? this.escapeHtml(s) : this._escapeHtml(s);
-        const data = await this.apiCall('/api/moderation/role-classes');
+        const data = await this.apiCall('/moderation/role-classes');
         const container = document.getElementById('role-classes-container');
         if (!container) return;
 
@@ -530,7 +530,7 @@ export const ModerationMixin = {
     },
 
     async editRoleClass(id) {
-        const rc = await this.apiCall(`/api/moderation/role-classes/${id}`);
+        const rc = await this.apiCall(`/moderation/role-classes/${id}`);
         if (!rc) return;
         this._showRoleClassModal(rc);
     },
@@ -567,7 +567,7 @@ export const ModerationMixin = {
             };
             if (isEdit) payload.id = existing.id;
 
-            const res = await this.apiCall('/api/moderation/role-classes', {
+            const res = await this.apiCall('/moderation/role-classes', {
                 method: 'POST',
                 body: JSON.stringify(payload),
             });
@@ -585,7 +585,7 @@ export const ModerationMixin = {
         this.showModal('delete role class', `
             <p style="font-size:0.85rem;">are you sure you want to delete this role class? this action cannot be undone.</p>
         `, async () => {
-            const res = await this.apiCall(`/api/moderation/role-classes/${id}`, { method: 'DELETE' });
+            const res = await this.apiCall(`/moderation/role-classes/${id}`, { method: 'DELETE' });
             if (res !== undefined) {
                 this.toast('role class deleted', 'success');
                 this.closeModal();
@@ -605,7 +605,7 @@ export const ModerationMixin = {
         `, async () => {
             const roleId = document.getElementById('modal-assign-role-id')?.value.trim();
             if (!roleId) { this.toast('role id is required', 'warning'); return; }
-            const res = await this.apiCall(`/api/moderation/role-classes/${classId}/roles`, {
+            const res = await this.apiCall(`/moderation/role-classes/${classId}/roles`, {
                 method: 'POST',
                 body: JSON.stringify({ role_id: roleId }),
             });
@@ -620,7 +620,7 @@ export const ModerationMixin = {
     },
 
     async removeRoleFromClass(classId, roleId) {
-        const res = await this.apiCall(`/api/moderation/role-classes/${classId}/roles/${roleId}`, {
+        const res = await this.apiCall(`/moderation/role-classes/${classId}/roles/${roleId}`, {
             method: 'DELETE',
         });
         if (res !== undefined) {
