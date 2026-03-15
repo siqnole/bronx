@@ -219,6 +219,10 @@ app.use(guideRoutes);
 app.use(privacyRoutes);
 app.use(avatarProxyRoutes);
 
+// Leaderboard routes
+const leaderboardRoutes = require('./routes/leaderboard');
+app.use(leaderboardRoutes);
+
 // Realtime routes (not a Router — registers directly on app)
 registerRealtimeRoutes(app);
 

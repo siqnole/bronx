@@ -2542,7 +2542,6 @@ canvas {
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: opacity 0.45s ease, visibility 0.45s ease;
     overflow: hidden;
 }
 
@@ -2644,18 +2643,68 @@ canvas {
     background: radial-gradient(ellipse 70% 60% at 50% 50%, transparent 40%, rgba(6, 6, 10, 0.6) 100%);
 }
 
-#loading-splash.hidden {
-    opacity: 0;
-    visibility: hidden;
+/* ── Splash Exit Animation Classes ─────────────────────────── */
+#loading-splash.splash-exit {
     pointer-events: none;
+    animation-fill-mode: forwards;
 }
+
+/* 1 — Fade Out */
+#loading-splash.splash-out-fade        { animation: splashFade       0.6s ease forwards; }
+/* 2 — Slide Up */
+#loading-splash.splash-out-slide-up    { animation: splashSlideUp    0.55s cubic-bezier(.4,0,.2,1) forwards; }
+/* 3 — Slide Down */
+#loading-splash.splash-out-slide-down  { animation: splashSlideDown  0.55s cubic-bezier(.4,0,.2,1) forwards; }
+/* 4 — Slide Left */
+#loading-splash.splash-out-slide-left  { animation: splashSlideLeft  0.55s cubic-bezier(.4,0,.2,1) forwards; }
+/* 5 — Slide Right */
+#loading-splash.splash-out-slide-right { animation: splashSlideRight 0.55s cubic-bezier(.4,0,.2,1) forwards; }
+/* 6 — Zoom Out (shrink away) */
+#loading-splash.splash-out-zoom-out    { animation: splashZoomOut    0.5s ease forwards; }
+/* 7 — Zoom In (burst towards viewer) */
+#loading-splash.splash-out-zoom-in     { animation: splashZoomIn     0.45s ease forwards; }
+/* 8 — Spin Away */
+#loading-splash.splash-out-spin        { animation: splashSpin       0.65s ease forwards; }
+/* 9 — Flip X */
+#loading-splash.splash-out-flip-x      { animation: splashFlipX      0.6s ease forwards; perspective: 1200px; }
+/* 10 — Flip Y */
+#loading-splash.splash-out-flip-y      { animation: splashFlipY      0.6s ease forwards; perspective: 1200px; }
+/* 11 — Rotate Scale */
+#loading-splash.splash-out-rotate-scale { animation: splashRotateScale 0.6s ease forwards; }
+/* 12 — Fade Blur */
+#loading-splash.splash-out-blur        { animation: splashBlur       0.55s ease forwards; }
+/* 13 — Glitch Out */
+#loading-splash.splash-out-glitch      { animation: splashGlitch     0.5s steps(8) forwards; }
+/* 14 — Door Close (scale X to 0) */
+#loading-splash.splash-out-door        { animation: splashDoor       0.5s ease-in forwards; }
+/* 15 — Diagonal Slide */
+#loading-splash.splash-out-diagonal    { animation: splashDiagonal   0.55s cubic-bezier(.4,0,.2,1) forwards; }
+/* 16 — Spiral */
+#loading-splash.splash-out-spiral      { animation: splashSpiral     0.7s ease forwards; }
+/* 17 — Curtain (vertical squeeze) */
+#loading-splash.splash-out-curtain     { animation: splashCurtain    0.5s ease-in forwards; }
+/* 18 — Swing Out */
+#loading-splash.splash-out-swing       { animation: splashSwing      0.55s ease-in forwards; transform-origin: top center; }
+/* 19 — Bounce Out */
+#loading-splash.splash-out-bounce      { animation: splashBounce     0.7s cubic-bezier(.6,-.28,.74,.05) forwards; }
+/* 20 — Skew Warp */
+#loading-splash.splash-out-skew        { animation: splashSkew       0.5s ease-in forwards; }
+/* 21 — Iris Close (clip-path circle) */
+#loading-splash.splash-out-iris        { animation: splashIris       0.6s ease-in forwards; }
+/* 22 — Split Horizontal */
+#loading-splash.splash-out-split       { animation: splashSplit      0.5s ease-in forwards; }
+/* 23 — Pixel Dissolve */
+#loading-splash.splash-out-dissolve    { animation: splashDissolve   0.6s ease forwards; }
+/* 24 — Tilt Fall */
+#loading-splash.splash-out-tilt        { animation: splashTilt       0.6s ease-in forwards; transform-origin: bottom left; }
+/* 25 — Vortex */
+#loading-splash.splash-out-vortex      { animation: splashVortex     0.7s ease-in forwards; }
 
 .splash-content {
     display: flex;
     flex-direction: column;
     align-items: center;
     gap: 1.25rem;
-    animation: splashFadeIn 0.5s ease;
     position: relative;
     z-index: 2;
 }
@@ -2989,4 +3038,153 @@ canvas {
 @keyframes splashFadeIn {
     from { opacity: 0; transform: translateY(8px); }
     to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Splash Exit Keyframes ─────────────────────────────────── */
+
+/* 1 — Fade */
+@keyframes splashFade {
+    to { opacity: 0; visibility: hidden; }
+}
+
+/* 2 — Slide Up */
+@keyframes splashSlideUp {
+    to { opacity: 0; transform: translateY(-100%); visibility: hidden; }
+}
+
+/* 3 — Slide Down */
+@keyframes splashSlideDown {
+    to { opacity: 0; transform: translateY(100%); visibility: hidden; }
+}
+
+/* 4 — Slide Left */
+@keyframes splashSlideLeft {
+    to { opacity: 0; transform: translateX(-100%); visibility: hidden; }
+}
+
+/* 5 — Slide Right */
+@keyframes splashSlideRight {
+    to { opacity: 0; transform: translateX(100%); visibility: hidden; }
+}
+
+/* 6 — Zoom Out */
+@keyframes splashZoomOut {
+    to { opacity: 0; transform: scale(0.3); visibility: hidden; }
+}
+
+/* 7 — Zoom In */
+@keyframes splashZoomIn {
+    to { opacity: 0; transform: scale(3); visibility: hidden; }
+}
+
+/* 8 — Spin Away */
+@keyframes splashSpin {
+    to { opacity: 0; transform: rotate(360deg) scale(0); visibility: hidden; }
+}
+
+/* 9 — Flip X */
+@keyframes splashFlipX {
+    to { opacity: 0; transform: rotateX(90deg); visibility: hidden; }
+}
+
+/* 10 — Flip Y */
+@keyframes splashFlipY {
+    to { opacity: 0; transform: rotateY(90deg); visibility: hidden; }
+}
+
+/* 11 — Rotate Scale */
+@keyframes splashRotateScale {
+    to { opacity: 0; transform: rotate(-15deg) scale(0.8); visibility: hidden; }
+}
+
+/* 12 — Blur */
+@keyframes splashBlur {
+    to { opacity: 0; filter: blur(30px); visibility: hidden; }
+}
+
+/* 13 — Glitch */
+@keyframes splashGlitch {
+    0%   { opacity: 1; transform: translate(0); filter: none; }
+    12%  { opacity: 0.8; transform: translate(-8px, 3px) skewX(-2deg); filter: hue-rotate(90deg); }
+    25%  { opacity: 0.9; transform: translate(6px, -2px) skewX(1deg); }
+    37%  { opacity: 0.6; transform: translate(-4px, 5px) skewX(-4deg); filter: hue-rotate(180deg); }
+    50%  { opacity: 0.7; transform: translate(10px, -4px) skewX(3deg); }
+    62%  { opacity: 0.4; transform: translate(-12px, 2px) skewX(-6deg); filter: hue-rotate(270deg); }
+    75%  { opacity: 0.3; transform: translate(5px, -6px) skewX(2deg); }
+    100% { opacity: 0; transform: translate(0) skewX(0); visibility: hidden; }
+}
+
+/* 14 — Door Close */
+@keyframes splashDoor {
+    to { opacity: 0; transform: scaleX(0); visibility: hidden; }
+}
+
+/* 15 — Diagonal */
+@keyframes splashDiagonal {
+    to { opacity: 0; transform: translate(80%, -80%); visibility: hidden; }
+}
+
+/* 16 — Spiral */
+@keyframes splashSpiral {
+    0%   { opacity: 1; transform: rotate(0) scale(1); }
+    50%  { opacity: 0.5; transform: rotate(180deg) scale(0.5); }
+    100% { opacity: 0; transform: rotate(540deg) scale(0); visibility: hidden; }
+}
+
+/* 17 — Curtain (vertical squeeze) */
+@keyframes splashCurtain {
+    to { opacity: 0; transform: scaleY(0); visibility: hidden; }
+}
+
+/* 18 — Swing Out */
+@keyframes splashSwing {
+    20%  { transform: rotate(8deg); opacity: 1; }
+    40%  { transform: rotate(-5deg); }
+    60%  { transform: rotate(3deg); opacity: 0.6; }
+    100% { transform: rotate(90deg); opacity: 0; visibility: hidden; }
+}
+
+/* 19 — Bounce Out */
+@keyframes splashBounce {
+    0%   { transform: translateY(0); opacity: 1; }
+    20%  { transform: translateY(-30px); opacity: 1; }
+    100% { transform: translateY(120vh); opacity: 0; visibility: hidden; }
+}
+
+/* 20 — Skew Warp */
+@keyframes splashSkew {
+    to { opacity: 0; transform: skew(20deg, 10deg) scale(0.7); visibility: hidden; }
+}
+
+/* 21 — Iris Close */
+@keyframes splashIris {
+    from { clip-path: circle(150% at 50% 50%); opacity: 1; }
+    to   { clip-path: circle(0% at 50% 50%); opacity: 0; visibility: hidden; }
+}
+
+/* 22 — Split Horizontal */
+@keyframes splashSplit {
+    0%   { clip-path: inset(0 0 0 0); opacity: 1; }
+    100% { clip-path: inset(50% 0 50% 0); opacity: 0; visibility: hidden; }
+}
+
+/* 23 — Pixel Dissolve */
+@keyframes splashDissolve {
+    0%   { opacity: 1; filter: brightness(1) contrast(1); }
+    30%  { opacity: 0.7; filter: brightness(1.4) contrast(1.5) saturate(0); }
+    60%  { opacity: 0.3; filter: brightness(2) contrast(2) blur(4px); }
+    100% { opacity: 0; filter: brightness(3) contrast(3) blur(12px); visibility: hidden; }
+}
+
+/* 24 — Tilt Fall */
+@keyframes splashTilt {
+    0%   { transform: rotate(0); opacity: 1; }
+    100% { transform: rotate(25deg) translateY(40%); opacity: 0; visibility: hidden; }
+}
+
+/* 25 — Vortex */
+@keyframes splashVortex {
+    0%   { transform: rotate(0) scale(1); opacity: 1; filter: none; }
+    50%  { transform: rotate(270deg) scale(0.4); opacity: 0.5; filter: blur(4px); }
+    100% { transform: rotate(720deg) scale(0); opacity: 0; filter: blur(12px); visibility: hidden; }
 }

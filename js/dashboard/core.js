@@ -60,27 +60,65 @@ class BronxBotDashboard {
 
     // ── Initialization ─────────────────────────────────────────
     async initialize() {
-        await this.checkAuthentication();
-        this.initializeRealtime();
-        this.initCommandPalette();
-        this.initSidebar();
-        this.setupEventListeners();
-        this.setupFormEnhancements();
-        this.setupKeyboardShortcuts();
+        // Guarantee splash is visible for at least 1.2s
+        const splashMinTime = new Promise(r => setTimeout(r, 1200));
 
-        if (this.isAuthenticated) {
-            await this.loadUserData();
-            this.setupCharts();
-        } else {
-            window.location.href = '/servers';
-            return;
+        try {
+            await this.checkAuthentication();
+            this.initializeRealtime();
+            this.initCommandPalette();
+            this.initSidebar();
+            this.setupEventListeners();
+            this.setupFormEnhancements();
+            this.setupKeyboardShortcuts();
+
+            if (this.isAuthenticated) {
+                await this.loadUserData();
+                this.setupCharts();
+            } else {
+                window.location.href = '/servers';
+                return;
+            }
+        } catch (err) {
+            console.error('Dashboard initialization failed:', err);
         }
 
-        // Dismiss loading splash
+        // Wait for minimum splash display time before dismissing
+        await splashMinTime;
+
+        // Dismiss loading splash with a random exit animation
         const splash = document.getElementById('loading-splash');
         if (splash) {
-            splash.classList.add('hidden');
-            splash.addEventListener('transitionend', () => splash.remove(), { once: true });
+            const exits = [
+                'splash-out-fade',
+                'splash-out-slide-up',
+                'splash-out-slide-down',
+                'splash-out-slide-left',
+                'splash-out-slide-right',
+                'splash-out-zoom-out',
+                'splash-out-zoom-in',
+                'splash-out-spin',
+                'splash-out-flip-x',
+                'splash-out-flip-y',
+                'splash-out-rotate-scale',
+                'splash-out-blur',
+                'splash-out-glitch',
+                'splash-out-door',
+                'splash-out-diagonal',
+                'splash-out-spiral',
+                'splash-out-curtain',
+                'splash-out-swing',
+                'splash-out-bounce',
+                'splash-out-skew',
+                'splash-out-iris',
+                'splash-out-split',
+                'splash-out-dissolve',
+                'splash-out-tilt',
+                'splash-out-vortex'
+            ];
+            const pick = exits[Math.floor(Math.random() * exits.length)];
+            splash.classList.add('splash-exit', pick);
+            splash.addEventListener('animationend', () => splash.remove(), { once: true });
         }
     }
 
@@ -226,6 +264,7 @@ class BronxBotDashboard {
     switchTab(tabName) {
         if (!this.selectedServerId && tabName !== 'overview') {
             this.toast('Please select a server first', 'warning');
+            return;
         }
 
         document.querySelectorAll('.nav-item').forEach(item => item.classList.remove('active'));
@@ -246,6 +285,7 @@ class BronxBotDashboard {
     }
 
     async loadTabData(tabName) {
+        if (!this.currentGuild) return;
         switch (tabName) {
             case 'overview': await this.loadOverviewData(); break;
             case 'guild-settings': await this.loadGuildSettingsData(); break;
@@ -268,6 +308,7 @@ class BronxBotDashboard {
             case 'heatmap': await this.loadHeatmapData(); break;
             case 'user-profiles': break; // loaded on-demand via button
             case 'channel-analytics': await this.loadChannelAnalytics(); break;
+            case 'role-classes': await this.loadRoleClassesData(); break;
         }
     }
 
@@ -322,7 +363,6 @@ class BronxBotDashboard {
         this.applyEconomyModeGating();
 
         this.joinServerRoom(this.selectedServerId);
-        await this.loadTabData(this.currentTab);
     }
 
     // ── Utility Methods (instance) ─────────────────────────────

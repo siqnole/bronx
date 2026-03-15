@@ -150,7 +150,7 @@ export const RealtimeMixin = {
     // ── Data Updates ───────────────────────────────────────────
     updateRealtimeStats(stats) {
         if (!stats) return;
-        if (this.currentTab === 'overview' && this.selectedServerId) {
+        if (this.currentTab === 'overview' && this.selectedServerId && this.currentGuild) {
             this.loadOverviewData();
         }
         if (this.charts.overview) {

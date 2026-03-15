@@ -219,6 +219,9 @@
                             <li class="nav-item" data-tab="mod-logs">
                                 <i class="fas fa-clipboard-list"></i><span>mod logs</span>
                             </li>
+                            <li class="nav-item" data-tab="role-classes">
+                                <i class="fas fa-users-cog"></i><span>role classes</span>
+                            </li>
                         </ul>
                     </li>
                     
@@ -405,6 +408,61 @@
 
                 <!-- Moderation Tab -->
                 <section id="moderation" class="tab-content">
+                    <div class="card">
+                        <div class="card-header">
+                            <h3 class="card-title"><i class="fas fa-gavel"></i> infractions</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="infraction-filters" style="display:flex;gap:0.75rem;margin-bottom:1rem;flex-wrap:wrap;align-items:center;">
+                                <select id="infraction-type-filter" class="form-input" style="width:auto;">
+                                    <option value="">all types</option>
+                                    <option value="warn">warn</option>
+                                    <option value="timeout">timeout</option>
+                                    <option value="mute">mute</option>
+                                    <option value="jail">jail</option>
+                                    <option value="kick">kick</option>
+                                    <option value="ban">ban</option>
+                                </select>
+                                <input type="text" id="infraction-user-filter" class="form-input" placeholder="user id" style="width:160px;">
+                                <label class="toggle-label" style="display:flex;align-items:center;gap:0.4rem;font-size:0.82rem;">
+                                    <input type="checkbox" id="infraction-active-filter" checked> active only
+                                </label>
+                                <button class="btn btn-primary btn-sm" id="filter-infractions-btn"><i class="fas fa-filter"></i> filter</button>
+                            </div>
+                            <div class="card-body--flush">
+                                <table class="data-table">
+                                    <thead>
+                                        <tr>
+                                            <th>case</th><th>user</th><th>type</th><th>points</th><th>date</th><th>status</th><th class="text-right">actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="infractions-tbody"></tbody>
+                                </table>
+                            </div>
+                            <div id="infractions-pagination" class="pagination-controls" style="margin-top:0.75rem;"></div>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-header">
+                            <h3 class="card-title"><i class="fas fa-sliders-h"></i> infraction settings</h3>
+                            <button class="btn btn-primary btn-sm" id="save-infraction-config"><i class="fas fa-save"></i> save</button>
+                        </div>
+                        <div class="card-body" id="infraction-config-body">
+                            <!-- Populated by JS -->
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-header">
+                            <h3 class="card-title"><i class="fas fa-robot"></i> auto-moderation</h3>
+                            <button class="btn btn-primary btn-sm" id="save-automod-config"><i class="fas fa-save"></i> save</button>
+                        </div>
+                        <div class="card-body" id="automod-config-body">
+                            <!-- Populated by JS -->
+                        </div>
+                    </div>
+
                     <div class="card"><div class="card-header"><h3 class="card-title"><i class="fas fa-clock"></i> cooldown management</h3></div><div class="card-body card-body--flush"><div class="data-table-wrap"><table class="data-table"><thead><tr><th>Command</th><th>Cooldown</th><th class="text-right">Actions</th></tr></thead><tbody id="cooldown-settings-tbody"></tbody></table></div></div></div>
                     <div class="card"><div class="card-header"><h3 class="card-title"><i class="fas fa-broom"></i> autopurge</h3><button class="btn btn-primary btn-sm" id="add-autopurge"><i class="fas fa-plus"></i> add schedule</button></div><div class="card-body"><div class="item-list" id="autopurge-list"></div></div></div>
                 </section>
@@ -510,6 +568,22 @@
                 <!-- Leaderboards Tab -->
                 <section id="leaderboards" class="tab-content">
                     <div class="card"><div class="card-header"><h3 class="card-title"><i class="fas fa-trophy"></i> server leaderboards</h3><div class="card-header-actions"><button class="btn btn-outline btn-sm" id="lb-prev" title="Previous page"><i class="fas fa-chevron-left"></i></button><span id="lb-page" style="font-size:0.8rem;color:var(--fg-dim);margin:0 0.5rem;">1</span><button class="btn btn-outline btn-sm" id="lb-next" title="Next page"><i class="fas fa-chevron-right"></i></button><select id="leaderboard-type" class="input input--sm" style="margin-left:0.5rem;"><option value="xp">XP</option><option value="level">Level</option><option value="coins">Coins</option><option value="messages">Messages</option><option value="fishing">Fishing</option><option value="gambling">Gambling</option></select><button class="btn btn-outline btn-sm" id="refresh-leaderboard"><i class="fas fa-sync-alt"></i> refresh</button></div></div><div class="card-body card-body--flush"><div class="data-table-wrap" id="leaderboard-data"><table class="data-table"><thead><tr><th>Rank</th><th>User</th><th>Value</th></tr></thead><tbody id="leaderboard-body"></tbody></table></div></div></div>
+                </section>
+
+                <!-- Role Classes Tab -->
+                <section id="role-classes" class="tab-content">
+                    <div class="card">
+                        <div class="card-header">
+                            <h3 class="card-title"><i class="fas fa-users-cog"></i> role classes</h3>
+                            <button class="btn btn-primary btn-sm" id="create-role-class"><i class="fas fa-plus"></i> create class</button>
+                        </div>
+                        <div class="card-body">
+                            <p class="text-dim" style="margin-bottom:1rem;font-size:0.82rem;">define classes, assign roles to them, and control which commands each class can use.</p>
+                            <div class="item-list" id="role-classes-list">
+                                <!-- Populated by JS -->
+                            </div>
+                        </div>
+                    </div>
                 </section>
 
                 <!-- Mod Logs Tab -->

@@ -349,9 +349,13 @@ export class SearchableSelectManager {
             const result = await this.dashboard.apiCall('/discord/channels');
             console.log('SearchableSelect: /discord/channels response:', result);
             this.channelsCache = Array.isArray(result) ? result : [];
+            if (!this.channelsCache.length) {
+                this.dashboard.toast?.('Could not load channels — is the bot in this server?', 'warning');
+            }
             return this.channelsCache;
         } catch (e) {
             console.error('Failed to fetch channels:', e);
+            this.dashboard.toast?.('Failed to load channels', 'error');
             return [];
         }
     }
@@ -365,9 +369,13 @@ export class SearchableSelectManager {
             const result = await this.dashboard.apiCall('/discord/roles');
             console.log('SearchableSelect: /discord/roles response:', result);
             this.rolesCache = Array.isArray(result) ? result : [];
+            if (!this.rolesCache.length) {
+                this.dashboard.toast?.('Could not load roles — is the bot in this server?', 'warning');
+            }
             return this.rolesCache;
         } catch (e) {
             console.error('Failed to fetch roles:', e);
+            this.dashboard.toast?.('Failed to load roles', 'error');
             return [];
         }
     }

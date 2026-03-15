@@ -442,16 +442,27 @@ export const StatisticsMixin = {
             container.innerHTML = '<div style="padding:1.5rem;color:var(--fg-dim);text-align:center;"><i class="fas fa-clipboard-check"></i> no mod logs found</div>';
             return;
         }
-        const icons = { ban: 'gavel', kick: 'boot', warn: 'exclamation-triangle', mute: 'volume-mute', unban: 'unlock', timeout: 'clock' };
+        const icons = { ban: 'gavel', kick: 'boot', warn: 'exclamation-triangle', mute: 'volume-mute', unban: 'unlock', timeout: 'clock', auto_spam: 'robot', auto_filter: 'filter', auto_raid: 'shield-virus', auto_link: 'link', auto_caps: 'font', auto_mention: 'at' };
         container.innerHTML = logs.map(log => {
             const icon = icons[log.action] || 'shield-alt';
+            const isAuto = (log.action || '').startsWith('auto_');
+            const statusColor = log.active ? 'var(--red, #e74c3c)' : 'var(--green, #2ecc71)';
+            const statusLabel = log.active ? 'ACTIVE' : 'PARDONED';
+            const pts = log.points != null ? log.points : 0;
+            const caseNum = log.case_number ? `#${log.case_number}` : '';
             return `
             <div class="mod-log-entry" style="display:flex;align-items:center;gap:0.75rem;padding:0.6rem 0;border-bottom:1px solid var(--border);">
-                <i class="fas fa-${icon}" style="color:var(--accent);font-size:0.82rem;width:1.2rem;text-align:center;"></i>
-                <div style="flex:1;display:flex;flex-direction:column;gap:0.1rem;">
-                    <div style="display:flex;align-items:center;gap:0.5rem;">
+                <i class="fas fa-${icon}" style="color:${isAuto ? 'var(--yellow, #f1c40f)' : 'var(--accent)'};font-size:0.82rem;width:1.2rem;text-align:center;"></i>
+                <div style="flex:1;display:flex;flex-direction:column;gap:0.15rem;">
+                    <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">
+                        ${caseNum ? `<span style="font-family:monospace;font-size:0.7rem;color:var(--fg-dim);background:var(--bg-card,rgba(255,255,255,0.05));padding:0.05rem 0.35rem;border-radius:3px;">${caseNum}</span>` : ''}
                         <span style="font-weight:600;font-size:0.82rem;text-transform:capitalize;">${log.action}</span>
-                        <span style="font-family:monospace;font-size:0.72rem;color:var(--fg-dim);">user: ${log.target_id || log.user_id}</span>
+                        <span style="font-size:0.65rem;font-weight:600;padding:0.1rem 0.4rem;border-radius:4px;color:#fff;background:${statusColor};">${statusLabel}</span>
+                        ${pts ? `<span style="font-size:0.68rem;color:var(--yellow,#f1c40f);" title="infraction points"><i class="fas fa-star" style="font-size:0.6rem;"></i> ${pts}</span>` : ''}
+                    </div>
+                    <div style="display:flex;align-items:center;gap:0.5rem;font-size:0.72rem;color:var(--fg-dim);">
+                        <span style="font-family:monospace;">user: ${log.target_id || log.user_id}</span>
+                        ${log.moderator_id ? `<span style="font-family:monospace;">mod: ${log.moderator_id}</span>` : ''}
                     </div>
                     <span style="font-size:0.72rem;color:var(--fg-dim);">${log.reason || 'no reason provided'}</span>
                 </div>
@@ -739,7 +750,7 @@ export const StatisticsMixin = {
         this.charts.wealthDist = new Chart(ctx, {
             type: 'bar',
             data: {
-                labels: dist.map(d => d.bracket),
+                labels: dist.map(d => d.label),
                 datasets: [{
                     label: 'users',
                     data: dist.map(d => logTransform(d.count)),
@@ -767,18 +778,18 @@ export const StatisticsMixin = {
 
         const body = document.getElementById('gambling-breakdown-tbody');
         if (!body) return;
-        const games = gambling.perGame || [];
+        const games = gambling.gameBreakdown || [];
         if (!games.length) {
             body.innerHTML = '<tr><td colspan="5" style="color:var(--fg-dim);text-align:center;padding:1rem;">no gambling data</td></tr>';
             return;
         }
         body.innerHTML = games.map(g => `
             <tr>
-                <td style="font-weight:600;text-transform:capitalize;">${g.game_type || '—'}</td>
-                <td>${formatNumber(g.players || 0)}</td>
-                <td style="color:${C.green};">$${formatNumber(g.total_won || 0)}</td>
-                <td style="color:${C.red};">$${formatNumber(g.total_lost || 0)}</td>
-                <td style="color:${C.yellow};">$${formatNumber(g.biggest_win || 0)}</td>
+                <td style="font-weight:600;text-transform:capitalize;">${g.game || '—'}</td>
+                <td>${formatNumber(g.games || 0)}</td>
+                <td style="color:${C.green};">$${formatNumber(g.won || 0)}</td>
+                <td style="color:${C.red};">$${formatNumber(g.lost || 0)}</td>
+                <td style="color:${C.yellow};">$${formatNumber(g.biggestWin || 0)}</td>
             </tr>
         `).join('');
     },
@@ -790,12 +801,12 @@ export const StatisticsMixin = {
         const data = await this.apiCall('/stats/economy');
         if (!data?.gambling) return;
         const gambling = data.gambling;
-        const games = gambling.perGame || [];
+        const games = gambling.gameBreakdown || [];
 
         // stat cards
-        const totalBets = games.reduce((s, g) => s + (g.players || 0), 0);
+        const totalBets = games.reduce((s, g) => s + (g.games || 0), 0);
         this._setText('gamble-total-bets', formatNumber(totalBets));
-        const biggestWin = games.reduce((m, g) => Math.max(m, g.biggest_win || 0), 0);
+        const biggestWin = games.reduce((m, g) => Math.max(m, g.biggestWin || 0), 0);
         this._setText('gamble-biggest-win', '$' + formatNumber(biggestWin));
         this._setText('gamble-unique-players', formatNumber(games.length));
 
@@ -810,16 +821,16 @@ export const StatisticsMixin = {
             return;
         }
         body.innerHTML = games.map(g => {
-            const net = (g.total_won || 0) - (g.total_lost || 0);
+            const net = (g.won || 0) - (g.lost || 0);
             const netColor = net >= 0 ? C.green : C.red;
             return `
             <tr>
-                <td style="font-weight:600;text-transform:capitalize;">${g.game_type || '—'}</td>
-                <td>${formatNumber(g.players || 0)}</td>
-                <td style="color:${C.green};">$${formatNumber(g.total_won || 0)}</td>
-                <td style="color:${C.red};">$${formatNumber(g.total_lost || 0)}</td>
+                <td style="font-weight:600;text-transform:capitalize;">${g.game || '—'}</td>
+                <td>${formatNumber(g.games || 0)}</td>
+                <td style="color:${C.green};">$${formatNumber(g.won || 0)}</td>
+                <td style="color:${C.red};">$${formatNumber(g.lost || 0)}</td>
                 <td style="color:${netColor};">${net >= 0 ? '+' : ''}$${formatNumber(Math.abs(net))}</td>
-                <td style="color:${C.yellow};">$${formatNumber(g.biggest_win || 0)}</td>
+                <td style="color:${C.yellow};">$${formatNumber(g.biggestWin || 0)}</td>
             </tr>`;
         }).join('');
     },
@@ -830,8 +841,8 @@ export const StatisticsMixin = {
         if (!ctx) return;
         if (this.charts.gamblingPnl) this.charts.gamblingPnl.destroy();
 
-        const labels = games.map(g => g.game_type || 'unknown');
-        const netData = games.map(g => (g.total_won || 0) - (g.total_lost || 0));
+        const labels = games.map(g => g.game || 'unknown');
+        const netData = games.map(g => (g.won || 0) - (g.lost || 0));
         const colors = netData.map(v => v >= 0 ? C.green : C.red);
 
         this.charts.gamblingPnl = new Chart(ctx, {
@@ -1412,6 +1423,84 @@ export const StatisticsMixin = {
                 scales: defaultScales()
             }
         });
+
+        // ── infractions section ──
+        this._loadUserInfractions(userId);
+    },
+
+    async _loadUserInfractions(userId) {
+        const container = document.getElementById('profile-infractions');
+        // Create the section container if not present
+        if (!container) {
+            const profileContent = document.getElementById('user-profile-content');
+            if (!profileContent) return;
+            const section = document.createElement('div');
+            section.id = 'profile-infractions';
+            section.style.cssText = 'margin-top:1.2rem;';
+            profileContent.appendChild(section);
+            return this._loadUserInfractions(userId);
+        }
+
+        container.innerHTML = '<div style="padding:1rem;color:var(--fg-dim);text-align:center;"><i class="fas fa-spinner fa-spin"></i> loading infractions…</div>';
+
+        try {
+            const summary = await this.apiCall(`/moderation/user/${userId}/summary`);
+            if (!summary || summary.error) {
+                container.innerHTML = '<div style="padding:1rem;color:var(--fg-dim);text-align:center;"><i class="fas fa-check-circle"></i> no infractions</div>';
+                return;
+            }
+
+            const total = summary.total || 0;
+            const active = summary.active || 0;
+            const pardoned = summary.pardoned || 0;
+            const points = summary.active_points != null ? summary.active_points : 0;
+            const recent = Array.isArray(summary.recent) ? summary.recent.slice(0, 10) : [];
+
+            const infIcons = { ban: 'gavel', kick: 'boot', warn: 'exclamation-triangle', mute: 'volume-mute', timeout: 'clock', auto_spam: 'robot', auto_filter: 'filter' };
+
+            container.innerHTML = `
+                <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.6rem;">
+                    <i class="fas fa-exclamation-circle" style="color:var(--accent);"></i>
+                    <span style="font-weight:700;font-size:0.88rem;">Infractions</span>
+                    ${points ? `<span style="margin-left:auto;font-size:0.72rem;font-weight:700;padding:0.15rem 0.55rem;border-radius:6px;color:#fff;background:var(--red,#e74c3c);">${points} pts active</span>` : ''}
+                </div>
+                <div style="display:flex;gap:0.75rem;margin-bottom:0.8rem;flex-wrap:wrap;">
+                    <div style="padding:0.4rem 0.8rem;border-radius:6px;background:var(--bg-card,rgba(255,255,255,0.05));font-size:0.78rem;">
+                        <span style="color:var(--fg-dim);">total</span> <strong>${total}</strong>
+                    </div>
+                    <div style="padding:0.4rem 0.8rem;border-radius:6px;background:var(--bg-card,rgba(255,255,255,0.05));font-size:0.78rem;">
+                        <span style="color:var(--red,#e74c3c);">active</span> <strong>${active}</strong>
+                    </div>
+                    <div style="padding:0.4rem 0.8rem;border-radius:6px;background:var(--bg-card,rgba(255,255,255,0.05));font-size:0.78rem;">
+                        <span style="color:var(--green,#2ecc71);">pardoned</span> <strong>${pardoned}</strong>
+                    </div>
+                </div>
+                ${recent.length ? `<div style="display:flex;flex-direction:column;gap:0;">
+                    ${recent.map(inf => {
+                        const ic = infIcons[inf.action || inf.type] || 'shield-alt';
+                        const st = inf.active ? 'ACTIVE' : 'PARDONED';
+                        const stC = inf.active ? 'var(--red,#e74c3c)' : 'var(--green,#2ecc71)';
+                        const p = inf.points != null ? inf.points : 0;
+                        const cn = inf.case_number ? `#${inf.case_number}` : '';
+                        return `<div style="display:flex;align-items:center;gap:0.6rem;padding:0.45rem 0;border-bottom:1px solid var(--border);">
+                            <i class="fas fa-${ic}" style="color:var(--accent);font-size:0.75rem;width:1rem;text-align:center;"></i>
+                            <div style="flex:1;display:flex;flex-direction:column;gap:0.05rem;">
+                                <div style="display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;">
+                                    ${cn ? `<span style="font-family:monospace;font-size:0.68rem;color:var(--fg-dim);">${cn}</span>` : ''}
+                                    <span style="font-weight:600;font-size:0.78rem;text-transform:capitalize;">${inf.action || inf.type}</span>
+                                    <span style="font-size:0.6rem;font-weight:600;padding:0.05rem 0.3rem;border-radius:3px;color:#fff;background:${stC};">${st}</span>
+                                    ${p ? `<span style="font-size:0.65rem;color:var(--yellow,#f1c40f);"><i class="fas fa-star" style="font-size:0.55rem;"></i> ${p}</span>` : ''}
+                                </div>
+                                <span style="font-size:0.68rem;color:var(--fg-dim);">${inf.reason || 'no reason'}</span>
+                            </div>
+                            <span style="font-size:0.65rem;color:var(--fg-dim);white-space:nowrap;">${timeAgo(inf.created_at)}</span>
+                        </div>`;
+                    }).join('')}
+                </div>` : '<div style="padding:0.5rem;color:var(--fg-dim);font-size:0.78rem;">no recent infractions</div>'}
+            `;
+        } catch (e) {
+            container.innerHTML = '<div style="padding:1rem;color:var(--fg-dim);text-align:center;"><i class="fas fa-times-circle"></i> failed to load infractions</div>';
+        }
     },
 
     // ================================================================

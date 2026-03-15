@@ -22,16 +22,27 @@ async function resolveGuildMembers(guildId) {
         const cacheKey = `discord:members:${guildId}`;
         let members = await cache.get(cacheKey);
         if (!members && process.env.DISCORD_TOKEN) {
-            const resp = await axios.get(`${DISCORD_API_BASE}/guilds/${guildId}/members?limit=1000`, {
-                headers: { Authorization: `Bot ${process.env.DISCORD_TOKEN}` }
-            });
-            members = resp.data.map(m => ({
-                id: m.user.id,
-                username: m.user.username,
-                display_name: m.nick || m.user.global_name || m.user.username,
-                avatar: m.user.avatar
-            }));
-            await cache.set(cacheKey, members, 60);
+            // Paginate to fetch all members (Discord limits to 1000 per request)
+            members = [];
+            let after = '0';
+            for (let page = 0; page < 10; page++) {  // cap at 10k members
+                const resp = await axios.get(
+                    `${DISCORD_API_BASE}/guilds/${guildId}/members?limit=1000&after=${after}`, {
+                    headers: { Authorization: `Bot ${process.env.DISCORD_TOKEN}` }
+                });
+                const batch = resp.data;
+                if (!batch || batch.length === 0) break;
+                members.push(...batch.map(m => ({
+                    id: m.user.id,
+                    username: m.user.username,
+                    display_name: m.nick || m.user.global_name || m.user.username,
+                    avatar: m.user.avatar
+                })));
+                if (batch.length < 1000) break;  // last page
+                after = batch[batch.length - 1].user.id;
+            }
+            console.log(`[resolveGuildMembers] Fetched ${members.length} members for guild ${guildId}`);
+            await cache.set(cacheKey, members, 120);
         }
         if (members) {
             for (const m of members) {
@@ -249,19 +260,12 @@ router.get('/api/stats/overview', async (req, res) => {
         // We use the guild_member_events table if available, else approximate from Discord
         try {
             const [newMembers] = await db.execute(
-                'SELECT COUNT(*) as count FROM guild_member_events WHERE guild_id = ? AND event_type = "join" AND created_at >= CURDATE()',
+                `SELECT COUNT(*) as count FROM guild_member_events WHERE guild_id = ? AND event_type = 'join' AND created_at >= CURDATE()`,
                 [guildId]
             );
             newMembersTodayCount = Number(newMembers[0]?.count || 0);
         } catch (e) {
-            // Fallback: try member_joins or server_member_events
-            try {
-                const [newMembers] = await db.execute(
-                    'SELECT COUNT(*) as count FROM member_joins WHERE guild_id = ? AND joined_at >= CURDATE()',
-                    [guildId]
-                );
-                newMembersTodayCount = Number(newMembers[0]?.count || 0);
-            } catch (e2) { console.warn('new members today query failed:', e2.message); }
+            console.warn('new members today query failed:', e.message);
         }
 
         res.json({
@@ -995,7 +999,8 @@ router.get('/api/stats/economy', async (req, res) => {
                 `SELECT game_type, SUM(games_played) as games, SUM(total_bet) as bet, 
                         SUM(total_won) as won, SUM(total_lost) as lost,
                         MAX(biggest_win) as biggest_win
-                 FROM gambling_stats GROUP BY game_type ORDER BY games DESC`
+                 FROM user_gambling_stats WHERE guild_id = ? GROUP BY game_type ORDER BY games DESC`,
+                [guildId]
             );
             for (const r of gameRows) {
                 gamblingOverview.totalGames += Number(r.games);
@@ -1162,6 +1167,25 @@ router.get('/api/stats/fishing', async (req, res) => {
 
 // ── Voice Analytics ─────────────────────────────────────────────────────
 
+// Helper: base CTE that attaches "next event time" to each voice event via LEAD()
+// This correctly handles missing leave events by using the next event (join/leave/etc.)
+// by the same user as the implicit session end. Only the truly latest session per user
+// gets NOW() as fallback (i.e. is genuinely active).
+function voiceSessionsCTE(guildId, days) {
+    return {
+        sql: `voice_sessions AS (
+            SELECT id, user_id, channel_id, created_at AS join_time, event_type,
+                   LEAD(created_at) OVER (PARTITION BY user_id ORDER BY created_at) AS next_time,
+                   TIMESTAMPDIFF(SECOND, created_at,
+                       COALESCE(LEAD(created_at) OVER (PARTITION BY user_id ORDER BY created_at), NOW())
+                   ) AS duration_sec
+            FROM guild_voice_events
+            WHERE guild_id = ? AND created_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
+        )`,
+        params: [guildId, days]
+    };
+}
+
 router.get('/api/stats/voice', async (req, res) => {
     try {
         const db = getDb();
@@ -1186,27 +1210,19 @@ router.get('/api/stats/voice', async (req, res) => {
             uniqueUsers = Number(rows[0]?.users || 0);
         } catch (e) { console.warn('voice summary failed:', e.message); }
 
-        // ── compute session durations by pairing join/leave per user+channel ──
-        // Uses a self-join: for each join, find the next leave by the same user in the same channel
+        // ── compute session durations using LEAD() window function ──
+        // Pairs each join with the NEXT event by the same user (join/leave/etc.)
+        // Only the truly latest session per user falls back to NOW()
         try {
+            const cte = voiceSessionsCTE(guildId, days);
             const [rows] = await db.execute(
-                `SELECT COALESCE(SUM(duration_sec), 0) as total_sec,
+                `WITH ${cte.sql}
+                 SELECT COALESCE(SUM(duration_sec), 0) as total_sec,
                         COALESCE(AVG(duration_sec), 0) as avg_sec,
                         COUNT(*) as paired
-                 FROM (
-                     SELECT j.user_id, j.channel_id, j.created_at as join_time,
-                            TIMESTAMPDIFF(SECOND, j.created_at, MIN(l.created_at)) as duration_sec
-                     FROM guild_voice_events j
-                     INNER JOIN guild_voice_events l
-                         ON l.guild_id = j.guild_id AND l.user_id = j.user_id
-                         AND l.channel_id = j.channel_id AND l.event_type = 'leave'
-                         AND l.created_at > j.created_at
-                     WHERE j.guild_id = ? AND j.event_type = 'join'
-                       AND j.created_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
-                     GROUP BY j.id, j.user_id, j.channel_id, j.created_at
-                 ) paired_sessions
-                 WHERE duration_sec > 0 AND duration_sec < 86400`,
-                [guildId, days]
+                 FROM voice_sessions
+                 WHERE event_type = 'join' AND duration_sec > 0 AND duration_sec < 86400`,
+                cte.params
             );
             totalMinutes = Math.round(Number(rows[0]?.total_sec || 0) / 60);
             avgSessionMin = Math.round(Number(rows[0]?.avg_sec || 0) / 60);
@@ -1247,23 +1263,16 @@ router.get('/api/stats/voice', async (req, res) => {
             let channelTimes = {};
             if (channelIds.length > 0) {
                 try {
+                    const cte = voiceSessionsCTE(guildId, days);
                     const placeholders = channelIds.map(() => '?').join(',');
                     const [timeRows] = await db.execute(
-                        `SELECT channel_id, COALESCE(SUM(duration_sec), 0) as total_sec FROM (
-                            SELECT j.channel_id,
-                                   TIMESTAMPDIFF(SECOND, j.created_at, MIN(l.created_at)) as duration_sec
-                            FROM guild_voice_events j
-                            INNER JOIN guild_voice_events l
-                                ON l.guild_id = j.guild_id AND l.user_id = j.user_id
-                                AND l.channel_id = j.channel_id AND l.event_type = 'leave'
-                                AND l.created_at > j.created_at
-                            WHERE j.guild_id = ? AND j.event_type = 'join'
-                              AND j.created_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
-                              AND j.channel_id IN (${placeholders})
-                            GROUP BY j.id, j.channel_id, j.created_at
-                        ) paired WHERE duration_sec > 0 AND duration_sec < 86400
-                        GROUP BY channel_id`,
-                        [guildId, days, ...channelIds]
+                        `WITH ${cte.sql}
+                         SELECT channel_id, COALESCE(SUM(duration_sec), 0) as total_sec
+                         FROM voice_sessions
+                         WHERE event_type = 'join' AND duration_sec > 0 AND duration_sec < 86400
+                           AND channel_id IN (${placeholders})
+                         GROUP BY channel_id`,
+                        [...cte.params, ...channelIds]
                     );
                     for (const tr of timeRows) {
                         channelTimes[tr.channel_id] = Number(tr.total_sec || 0);
@@ -1294,23 +1303,16 @@ router.get('/api/stats/voice', async (req, res) => {
             let userTimes = {};
             if (userIds.length > 0) {
                 try {
+                    const cte = voiceSessionsCTE(guildId, days);
                     const placeholders = userIds.map(() => '?').join(',');
                     const [timeRows] = await db.execute(
-                        `SELECT user_id, COALESCE(SUM(duration_sec), 0) as total_sec FROM (
-                            SELECT j.user_id,
-                                   TIMESTAMPDIFF(SECOND, j.created_at, MIN(l.created_at)) as duration_sec
-                            FROM guild_voice_events j
-                            INNER JOIN guild_voice_events l
-                                ON l.guild_id = j.guild_id AND l.user_id = j.user_id
-                                AND l.channel_id = j.channel_id AND l.event_type = 'leave'
-                                AND l.created_at > j.created_at
-                            WHERE j.guild_id = ? AND j.event_type = 'join'
-                              AND j.created_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
-                              AND j.user_id IN (${placeholders})
-                            GROUP BY j.id, j.user_id, j.created_at
-                        ) paired WHERE duration_sec > 0 AND duration_sec < 86400
-                        GROUP BY user_id`,
-                        [guildId, days, ...userIds]
+                        `WITH ${cte.sql}
+                         SELECT user_id, COALESCE(SUM(duration_sec), 0) as total_sec
+                         FROM voice_sessions
+                         WHERE event_type = 'join' AND duration_sec > 0 AND duration_sec < 86400
+                           AND user_id IN (${placeholders})
+                         GROUP BY user_id`,
+                        [...cte.params, ...userIds]
                     );
                     for (const tr of timeRows) {
                         userTimes[tr.user_id] = Number(tr.total_sec || 0);
@@ -1343,27 +1345,24 @@ router.get('/api/stats/voice', async (req, res) => {
             }
         } catch (e) { console.warn('peak hours failed:', e.message); }
 
-        // ── recent sessions (last 20 join events with duration) ──
+        // ── recent sessions (last 20 join events with duration & active flag) ──
         try {
+            const cte = voiceSessionsCTE(guildId, days);
             const [rows] = await db.execute(
-                `SELECT j.user_id, j.channel_id, j.created_at as join_time,
-                        TIMESTAMPDIFF(SECOND, j.created_at, MIN(l.created_at)) as duration_sec
-                 FROM guild_voice_events j
-                 LEFT JOIN guild_voice_events l
-                     ON l.guild_id = j.guild_id AND l.user_id = j.user_id
-                     AND l.channel_id = j.channel_id AND l.event_type = 'leave'
-                     AND l.created_at > j.created_at
-                 WHERE j.guild_id = ? AND j.event_type = 'join'
-                   AND j.created_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
-                 GROUP BY j.id, j.user_id, j.channel_id, j.created_at
-                 ORDER BY j.created_at DESC LIMIT 20`,
-                [guildId, days]
+                `WITH ${cte.sql}
+                 SELECT user_id, channel_id, join_time, duration_sec,
+                        CASE WHEN next_time IS NULL THEN 1 ELSE 0 END as is_active
+                 FROM voice_sessions
+                 WHERE event_type = 'join'
+                 ORDER BY join_time DESC LIMIT 20`,
+                cte.params
             );
             recentSessions = rows.map(r => ({
                 user_id: r.user_id,
                 channel_id: r.channel_id,
                 join_time: r.join_time,
-                duration_sec: r.duration_sec ? Number(r.duration_sec) : null
+                duration_sec: r.is_active ? null : (r.duration_sec ? Number(r.duration_sec) : null),
+                is_active: !!r.is_active
             }));
         } catch (e) { console.warn('recent sessions failed:', e.message); }
 
@@ -1424,17 +1423,17 @@ router.get('/api/stats/top-users', async (req, res) => {
 
         let topMessages = [], topVoice = [], topCommands = [];
 
-        // Top messages
+        // Top messages — try rollup table first, fallback to raw events if empty/missing
         try {
             const [rows] = await db.execute(
-                `SELECT user_id, SUM(messages) as total FROM user_activity_daily
+                `SELECT user_id, SUM(messages) as total FROM guild_user_activity_daily
                  WHERE guild_id = ? AND ${dc('stat_date')}
                  GROUP BY user_id ORDER BY total DESC LIMIT ${limit}`,
                 [guildId]
             );
             topMessages = rows.map(r => ({ user_id: r.user_id, total: Number(r.total) }));
-        } catch (e) {
-            // fallback to raw events
+        } catch (e) { /* table missing or error — will try fallback */ }
+        if (!topMessages.length) {
             try {
                 const [rows] = await db.execute(
                     `SELECT user_id, COUNT(*) as total FROM guild_message_events
@@ -1446,30 +1445,52 @@ router.get('/api/stats/top-users', async (req, res) => {
             } catch (e2) { console.warn('top messages fallback failed:', e2.message); }
         }
 
-        // Top voice (minutes)
+        // Top voice (minutes) — try rollup table first, fallback to LEAD()-based computation
         try {
             const [rows] = await db.execute(
-                `SELECT user_id, SUM(voice_minutes) as total FROM user_activity_daily
+                `SELECT user_id, SUM(voice_minutes) as total FROM guild_user_activity_daily
                  WHERE guild_id = ? AND ${dc('stat_date')}
                  GROUP BY user_id ORDER BY total DESC LIMIT ${limit}`,
                 [guildId]
             );
             topVoice = rows.map(r => ({ user_id: r.user_id, total: Number(r.total) }));
-        } catch (e) {
-            console.warn('top voice query failed:', e.message);
+        } catch (e) { /* table missing or error — will try fallback */ }
+        if (!topVoice.length) {
+            try {
+                const effectiveDays = days === -1 ? 36500 : days;
+                const cte = voiceSessionsCTE(guildId, effectiveDays);
+                const [rows] = await db.execute(
+                    `WITH ${cte.sql}
+                     SELECT user_id, ROUND(SUM(duration_sec) / 60) as total
+                     FROM voice_sessions
+                     WHERE event_type = 'join' AND duration_sec > 0 AND duration_sec < 86400
+                     GROUP BY user_id ORDER BY total DESC LIMIT ${limit}`,
+                    cte.params
+                );
+                topVoice = rows.map(r => ({ user_id: r.user_id, total: Number(r.total) }));
+            } catch (e2) { console.warn('top voice fallback failed:', e2.message); }
         }
 
-        // Top commands
+        // Top commands — try rollup table first, fallback to command_stats
         try {
             const [rows] = await db.execute(
-                `SELECT user_id, SUM(commands_used) as total FROM user_activity_daily
+                `SELECT user_id, SUM(commands_used) as total FROM guild_user_activity_daily
                  WHERE guild_id = ? AND ${dc('stat_date')}
                  GROUP BY user_id ORDER BY total DESC LIMIT ${limit}`,
                 [guildId]
             );
             topCommands = rows.map(r => ({ user_id: r.user_id, total: Number(r.total) }));
-        } catch (e) {
-            console.warn('top commands query failed:', e.message);
+        } catch (e) { /* table missing or error — will try fallback */ }
+        if (!topCommands.length) {
+            try {
+                const [rows] = await db.execute(
+                    `SELECT user_id, COUNT(*) as total FROM command_stats
+                     WHERE guild_id = ? AND ${dc('used_at', true)}
+                     GROUP BY user_id ORDER BY total DESC LIMIT ${limit}`,
+                    [guildId]
+                );
+                topCommands = rows.map(r => ({ user_id: r.user_id, total: Number(r.total) }));
+            } catch (e2) { console.warn('top commands fallback failed:', e2.message); }
         }
 
         // Resolve usernames for all user IDs
@@ -1511,7 +1532,7 @@ router.get('/api/stats/user/:userId', async (req, res) => {
                 `SELECT COALESCE(SUM(messages),0) as messages,
                         COALESCE(SUM(voice_minutes),0) as voice_minutes,
                         COALESCE(SUM(commands_used),0) as commands_used
-                 FROM user_activity_daily
+                 FROM guild_user_activity_daily
                  WHERE guild_id = ? AND user_id = ? AND ${dc('stat_date')}`,
                 [guildId, userId]
             );
@@ -1525,7 +1546,7 @@ router.get('/api/stats/user/:userId', async (req, res) => {
         // Most active day
         try {
             const [rows] = await db.execute(
-                `SELECT stat_date, (messages + commands_used) as activity FROM user_activity_daily
+                `SELECT stat_date, (messages + commands_used) as activity FROM guild_user_activity_daily
                  WHERE guild_id = ? AND user_id = ? AND ${dc('stat_date')}
                  ORDER BY activity DESC LIMIT 1`,
                 [guildId, userId]
@@ -1537,7 +1558,7 @@ router.get('/api/stats/user/:userId', async (req, res) => {
         try {
             const [rows] = await db.execute(
                 `SELECT stat_date as date, messages, voice_minutes, commands_used
-                 FROM user_activity_daily
+                 FROM guild_user_activity_daily
                  WHERE guild_id = ? AND user_id = ? AND ${dc('stat_date')}
                  ORDER BY stat_date ASC`,
                 [guildId, userId]
@@ -1670,7 +1691,7 @@ router.get('/api/stats/compare', async (req, res) => {
                 const [rows] = await db.execute(
                     `SELECT COALESCE(SUM(messages),0) as m, COALESCE(SUM(voice_minutes),0) as v,
                             COALESCE(SUM(commands_used),0) as c
-                     FROM user_activity_daily WHERE guild_id = ? AND user_id = ? AND ${dc('stat_date')}`,
+                     FROM guild_user_activity_daily WHERE guild_id = ? AND user_id = ? AND ${dc('stat_date')}`,
                     [guildId, uid]
                 );
                 if (rows[0]) { totals.messages = Number(rows[0].m); totals.voice_minutes = Number(rows[0].v); totals.commands = Number(rows[0].c); }
@@ -1679,7 +1700,7 @@ router.get('/api/stats/compare', async (req, res) => {
             try {
                 const [rows] = await db.execute(
                     `SELECT stat_date as date, messages, voice_minutes, commands_used
-                     FROM user_activity_daily WHERE guild_id = ? AND user_id = ? AND ${dc('stat_date')}
+                     FROM guild_user_activity_daily WHERE guild_id = ? AND user_id = ? AND ${dc('stat_date')}
                      ORDER BY stat_date ASC`,
                     [guildId, uid]
                 );

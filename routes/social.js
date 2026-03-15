@@ -683,17 +683,17 @@ router.get('/api/leaderboard/:type', requireGuildAccess, async (req, res) => {
         switch (type) {
             case 'xp':
                 query = `
-                    SELECT user_id, server_xp as value, server_level as level
-                    FROM server_xp WHERE guild_id = ? AND server_xp > 0
-                    ORDER BY server_xp DESC LIMIT ${limit} OFFSET ${offset}
+                    SELECT user_id, total_xp as value, level
+                    FROM user_xp WHERE guild_id = ? AND total_xp > 0
+                    ORDER BY total_xp DESC LIMIT ${limit} OFFSET ${offset}
                 `;
                 params = [guildId];
                 break;
             case 'level':
                 query = `
-                    SELECT user_id, server_level as value, server_xp as xp
-                    FROM server_xp WHERE guild_id = ? AND server_level > 1
-                    ORDER BY server_level DESC, server_xp DESC LIMIT ${limit} OFFSET ${offset}
+                    SELECT user_id, level as value, total_xp as xp
+                    FROM user_xp WHERE guild_id = ? AND level > 1
+                    ORDER BY level DESC, total_xp DESC LIMIT ${limit} OFFSET ${offset}
                 `;
                 params = [guildId];
                 break;
@@ -703,7 +703,7 @@ router.get('/api/leaderboard/:type', requireGuildAccess, async (req, res) => {
                 query = `
                     SELECT u.user_id, u.wallet + COALESCE(u.bank, 0) as value, u.wallet, u.bank
                     FROM users u
-                    INNER JOIN server_xp sx ON sx.user_id = u.user_id AND sx.guild_id = ?
+                    INNER JOIN user_xp ux ON ux.user_id = u.user_id AND ux.guild_id = ?
                     WHERE (u.wallet > 0 OR u.bank > 0)
                     ORDER BY (u.wallet + COALESCE(u.bank, 0)) DESC LIMIT ${limit} OFFSET ${offset}
                 `;
@@ -735,11 +735,11 @@ router.get('/api/leaderboard/:type', requireGuildAccess, async (req, res) => {
             case 'gambling':
                 query = `
                     SELECT user_id, SUM(total_won) - SUM(total_lost) as value, SUM(games_played) as games_played
-                    FROM gambling_stats GROUP BY user_id
+                    FROM user_gambling_stats WHERE guild_id = ? GROUP BY user_id
                     HAVING value > 0
                     ORDER BY value DESC LIMIT ${limit} OFFSET ${offset}
                 `;
-                params = [];
+                params = [guildId];
                 break;
             case 'messages':
                 query = `
