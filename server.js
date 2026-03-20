@@ -56,31 +56,66 @@ const PORT = process.env.PORT || 3000;
 
 // ── Redis client for session storage ────────────────────────────────────
 // Use Redis instead of MemoryStore for production-safe session storage
-const redisClient = new Redis({
-    host: process.env.REDIS_HOST || 'localhost',
-    port: parseInt(process.env.REDIS_PORT || '6379'),
-    password: process.env.REDIS_PASSWORD,
+// Supports both connection URI (REDIS_URL from Render) and individual params
+
+let redisClient;
+const redisConfig = {
     retryStrategy: (times) => {
         const delay = Math.min(times * 50, 2000);
         return delay;
     },
     enableReadyCheck: false,
     enableOfflineQueue: false,
-    maxRetriesPerRequest: 3
-});
+    maxRetriesPerRequest: 3,
+    lazyConnect: false
+};
 
-redisClient.on('error', (err) => {
-    console.error('⚠️  Redis connection error. Falling back to MemoryStore:', err.message);
-    // Sessions will still work but won't persist across restarts
-});
+try {
+    // Try to connect via REDIS_URL (Render format: redis://host:port or redis://:password@host:port)
+    if (process.env.REDIS_URL) {
+        console.log('📍 Connecting to Redis via REDIS_URL...');
+        redisClient = new Redis(process.env.REDIS_URL, redisConfig);
+    } 
+    // Fall back to individual host/port/password parameters
+    else if (process.env.REDIS_HOST || process.env.REDIS_PORT) {
+        console.log('📍 Connecting to Redis via individual parameters...');
+        redisClient = new Redis({
+            ...redisConfig,
+            host: process.env.REDIS_HOST || 'localhost',
+            port: parseInt(process.env.REDIS_PORT || '6379'),
+            password: process.env.REDIS_PASSWORD || undefined
+        });
+    }
+    // Default to localhost
+    else {
+        console.log('📍 Connecting to Redis on localhost:6379...');
+        redisClient = new Redis({
+            ...redisConfig,
+            host: 'localhost',
+            port: 6379
+        });
+    }
+} catch (err) {
+    console.error('❌ Failed to initialize Redis client:', err.message);
+    console.warn('⚠️  Falling back to MemoryStore for sessions');
+    redisClient = null;
+}
 
-redisClient.on('connect', () => {
-    console.log('✓ Redis connected for session storage');
-});
+// Only set up event handlers if Redis client was created successfully
+if (redisClient) {
+    redisClient.on('error', (err) => {
+        console.error('⚠️  Redis connection error:', err.message);
+        // Sessions will degrade to memory but won't disappear
+    });
 
-redisClient.on('ready', () => {
-    console.log('✓ Redis ready for session storage');
-});
+    redisClient.on('connect', () => {
+        console.log('✓ Redis connected for session storage');
+    });
+
+    redisClient.on('ready', () => {
+        console.log('✓ Redis ready for session storage');
+    });
+}
 
 // Bot Owner Configuration
 const BOT_OWNER_ID = process.env.BOT_OWNER_ID || '';
@@ -102,8 +137,9 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, '.')));
 
 // Session middleware (shared with Socket.io)
+// Use RedisStore if Redis is available, otherwise fall back to MemoryStore
 const sessionMiddleware = session({
-    store: new RedisStore({ client: redisClient, prefix: 'bronx:session:' }),
+    store: redisClient ? new RedisStore({ client: redisClient, prefix: 'bronx:session:' }) : undefined,
     secret: process.env.SESSION_SECRET || 'bronx-bot-dashboard-secret',
     resave: false,
     saveUninitialized: false,
