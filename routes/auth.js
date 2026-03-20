@@ -9,6 +9,48 @@ const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET;
 const PORT = process.env.PORT || 3000;
 const BOT_OWNER_ID = process.env.BOT_OWNER_ID || '';
 
+// ── Exponential Backoff Retry Helper ────────────────────────────────────
+// Handles transient errors like Cloudflare rate limits (1015, 429)
+async function retryWithExponentialBackoff(fn, maxRetries = 5, initialDelayMs = 1000) {
+    let lastError;
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+        try {
+            return await fn();
+        } catch (error) {
+            lastError = error;
+            // Check if error is retryable (rate limit, gateway timeout, temporary network)
+            const status = error.response?.status;
+            const isRateLimited = status === 429 || error.response?.data?.error_code === 1015;
+            const isTemporary = status === 503 || status === 502 || status === 504 || status === 500;
+            const isNetworkError = error.code === 'ECONNRESET' || error.code === 'ETIMEDOUT' || 
+                                   error.code === 'ENOTFOUND' || error.code === 'ENETUNREACH';
+
+            if (!isRateLimited && !isTemporary && !isNetworkError && attempt > 0) {
+                // Non-retryable error, throw immediately
+                throw error;
+            }
+
+            if (attempt === maxRetries - 1) break; // Last attempt, don't delay
+
+            // Calculate exponential backoff: 1s, 2s, 4s, 8s, 16s...
+            const delayMs = initialDelayMs * Math.pow(2, attempt);
+            const jitter = Math.random() * delayMs * 0.1; // Add 10% jitter
+            const totalDelayMs = delayMs + jitter;
+
+            const retryAfter = error.response?.headers?.['retry-after'];
+            const serverSuggestedDelayMs = retryAfter ? parseInt(retryAfter) * 1000 : null;
+            const waitMs = Math.max(totalDelayMs, serverSuggestedDelayMs || 0);
+
+            console.log(`⚠️  Attempt ${attempt + 1}/${maxRetries} failed (${status || error.code}), ` +
+                        `retrying in ${(waitMs / 1000).toFixed(1)}s... ` +
+                        `(${error.response?.data?.error_name || error.message})`);
+
+            await new Promise(resolve => setTimeout(resolve, waitMs));
+        }
+    }
+    throw lastError;
+}
+
 // Build redirect URI dynamically from the incoming request so it works
 // on localhost, Render, and any custom domain without changing .env
 function getRedirectUri(req) {
@@ -24,24 +66,28 @@ function getRedirectUri(req) {
 
 async function getDiscordUser(accessToken) {
     try {
-        const response = await axios.get(`${DISCORD_API_BASE}/users/@me`, {
-            headers: { Authorization: `Bearer ${accessToken}` }
-        });
-        return response.data;
+        const user = await retryWithExponentialBackoff(
+            () => axios.get(`${DISCORD_API_BASE}/users/@me`, {
+                headers: { Authorization: `Bearer ${accessToken}` }
+            })
+        );
+        return user.data;
     } catch (error) {
-        console.error('Error fetching Discord user:', error.response?.data || error.message);
+        console.error('❌ Error fetching Discord user after retries:', error.response?.data || error.message);
         return null;
     }
 }
 
 async function getDiscordGuilds(accessToken) {
     try {
-        const response = await axios.get(`${DISCORD_API_BASE}/users/@me/guilds`, {
-            headers: { Authorization: `Bearer ${accessToken}` }
-        });
-        return response.data;
+        const guilds = await retryWithExponentialBackoff(
+            () => axios.get(`${DISCORD_API_BASE}/users/@me/guilds`, {
+                headers: { Authorization: `Bearer ${accessToken}` }
+            })
+        );
+        return guilds.data;
     } catch (error) {
-        console.error('Error fetching Discord guilds:', error.response?.data || error.message);
+        console.error('❌ Error fetching Discord guilds after retries:', error.response?.data || error.message);
         return [];
     }
 }
@@ -52,13 +98,15 @@ async function getBotGuilds() {
             console.warn('⚠️  Bot token not configured. Users will have access to 0 servers.');
             return [];
         }
-        const response = await axios.get(`${DISCORD_API_BASE}/users/@me/guilds`, {
-            headers: { Authorization: `Bot ${process.env.DISCORD_TOKEN}` }
-        });
-        return response.data;
+        const botGuilds = await retryWithExponentialBackoff(
+            () => axios.get(`${DISCORD_API_BASE}/users/@me/guilds`, {
+                headers: { Authorization: `Bot ${process.env.DISCORD_TOKEN}` }
+            })
+        );
+        return botGuilds.data;
     } catch (error) {
-        console.error('❌ Error fetching bot guilds:', error.response?.data || error.message);
-        console.warn('⚠️  Bot token may be invalid. Users will have access to 0 servers.');
+        console.error('❌ Error fetching bot guilds after retries:', error.response?.data || error.message);
+        console.warn('⚠️  Bot token may be invalid or rate limited. Users will have access to 0 servers.');
         return [];
     }
 }
@@ -89,19 +137,21 @@ router.get('/callback', async (req, res) => {
     }
     
     try {
-        // Exchange code for access token
+        // Exchange code for access token with retry logic
         const redirectUri = getRedirectUri(req);
-        const tokenResponse = await axios.post(`${DISCORD_API_BASE}/oauth2/token`, 
-            new URLSearchParams({
-                client_id: DISCORD_CLIENT_ID,
-                client_secret: DISCORD_CLIENT_SECRET,
-                grant_type: 'authorization_code',
-                code: code,
-                redirect_uri: redirectUri
-            }).toString(),
-            {
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
-            }
+        const tokenResponse = await retryWithExponentialBackoff(
+            () => axios.post(`${DISCORD_API_BASE}/oauth2/token`, 
+                new URLSearchParams({
+                    client_id: DISCORD_CLIENT_ID,
+                    client_secret: DISCORD_CLIENT_SECRET,
+                    grant_type: 'authorization_code',
+                    code: code,
+                    redirect_uri: redirectUri
+                }).toString(),
+                {
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+                }
+            )
         );
         
         const { access_token } = tokenResponse.data;
