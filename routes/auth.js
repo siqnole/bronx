@@ -141,6 +141,20 @@ function getUserPermissions(userGuild) {
     };
 }
 
+// ── Request Deduplication ──────────────────────────────────────────────
+// Prevent duplicate token exchanges for the same authorization code
+const pendingCodeExchanges = new Map();
+
+function getPendingExchange(code) {
+    return pendingCodeExchanges.get(code);
+}
+
+function setPendingExchange(code, promise) {
+    pendingCodeExchanges.set(code, promise);
+    // Clean up after 5 minutes to prevent memory leak
+    setTimeout(() => pendingCodeExchanges.delete(code), 5 * 60 * 1000);
+}
+
 // ── OAuth2 Routes ───────────────────────────────────────────────────────
 
 router.get('/login', (req, res) => {
@@ -157,72 +171,95 @@ router.get('/callback', async (req, res) => {
         return res.status(400).send('Authorization code not provided');
     }
     
-    try {
-        // Exchange code for access token with retry logic
-        const redirectUri = getRedirectUri(req);
-        const tokenResponse = await retryWithExponentialBackoff(
-            () => axios.post(`${DISCORD_API_BASE}/oauth2/token`, 
-                new URLSearchParams({
-                    client_id: DISCORD_CLIENT_ID,
-                    client_secret: DISCORD_CLIENT_SECRET,
-                    grant_type: 'authorization_code',
-                    code: code,
-                    redirect_uri: redirectUri
-                }).toString(),
-                {
-                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
-                }
-            )
-        );
-        
-        const { access_token } = tokenResponse.data;
-        
-        // Get user info
-        const user = await getDiscordUser(access_token);
-        if (!user) {
-            return res.status(500).send('Failed to get user information');
+    // Check if this code is already being exchanged
+    const existing = getPendingExchange(code);
+    if (existing) {
+        console.log(`⏳ Reusing pending exchange for code ${code.substring(0, 8)}...`);
+        try {
+            await existing;
+            // Note: This is a race condition if the first request is still writing the session.
+            // In production, share the session data via Redis instead.
+            return res.redirect('/servers');
+        } catch (error) {
+            return res.status(500).send('Authentication temporarily unavailable');
         }
-        
-        // Get user's guilds
-        const userGuilds = await getDiscordGuilds(access_token);
-        
-        // Get bot's guilds
-        const botGuilds = await getBotGuilds();
-        const botGuildIds = new Set(botGuilds.map(g => g.id));
-        
-        // Include guilds where user has management permissions
-        // Mark whether the bot is present in each guild
-        const accessibleGuilds = userGuilds.filter(guild => {
-            const perms = getUserPermissions(guild);
-            return perms.isOwner || perms.canManage || perms.canAdmin;
-        }).map(guild => ({
-            id: guild.id,
-            name: guild.name,
-            icon: guild.icon,
+    }
+    
+    // Create a promise for this exchange and store it
+    const exchangePromise = (async () => {
+        try {
+            // Exchange code for access token with retry logic
+            const redirectUri = getRedirectUri(req);
+            const tokenResponse = await retryWithExponentialBackoff(
+                () => axios.post(`${DISCORD_API_BASE}/oauth2/token`, 
+                    new URLSearchParams({
+                        client_id: DISCORD_CLIENT_ID,
+                        client_secret: DISCORD_CLIENT_SECRET,
+                        grant_type: 'authorization_code',
+                        code: code,
+                        redirect_uri: redirectUri
+                    }).toString(),
+                    {
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+                    }
+                )
+            );
+            
+            const { access_token } = tokenResponse.data;
+            
+            // Get user info
+            const user = await getDiscordUser(access_token);
+            if (!user) {
+                throw new Error('Failed to get user information');
+            }
+            
+            // Get user's guilds
+            const userGuilds = await getDiscordGuilds(access_token);
+            
+            // Get bot's guilds
+            const botGuilds = await getBotGuilds();
+            const botGuildIds = new Set(botGuilds.map(g => g.id));
+            
+            // Include guilds where user has management permissions
+            // Mark whether the bot is present in each guild
+            const accessibleGuilds = userGuilds.filter(guild => {
+                const perms = getUserPermissions(guild);
+                return perms.isOwner || perms.canManage || perms.canAdmin;
+            }).map(guild => ({
+                id: guild.id,
+                name: guild.name,
+                icon: guild.icon,
             permissions: getUserPermissions(guild),
-            botPresent: botGuildIds.has(guild.id)
-        }));
-        
-        // Store in session
-        req.session.user = {
-            id: user.id,
-            username: user.username,
-            discriminator: user.discriminator,
-            avatar: user.avatar,
-            global_name: user.global_name
-        };
-        req.session.accessToken = access_token;
-        req.session.accessibleGuilds = accessibleGuilds;
-        
-        console.log(`✓ User ${user.username} authenticated with access to ${accessibleGuilds.length} servers`);
-        console.log(`Session ID: ${req.sessionID}, Cookie: ${JSON.stringify(req.session.cookie)}`);
-        
-        // Redirect to server selection
+                botPresent: botGuildIds.has(guild.id)
+            }));
+            
+            // Store in session
+            req.session.user = {
+                id: user.id,
+                username: user.username,
+                discriminator: user.discriminator,
+                avatar: user.avatar,
+                global_name: user.global_name
+            };
+            req.session.accessToken = access_token;
+            req.session.accessibleGuilds = accessibleGuilds;
+            
+            console.log(`✓ User ${user.username} authenticated with access to ${accessibleGuilds.length} servers`);
+            console.log(`Session ID: ${req.sessionID}`);
+            
+            return { success: true, accessibleGuilds };
+        } catch (error) {
+            throw error;
+        }
+    })();
+    
+    setPendingExchange(code, exchangePromise);
+    
+    try {
+        await exchangePromise;
         res.redirect('/servers');
-        
     } catch (error) {
-        console.error('OAuth2 callback error:', error.response?.data || error.message);
-        res.status(500).send('Authentication failed');
+        console.error('❌ OAuth2 callback error:', error.response?.data || error.message);
     }
 });
 
