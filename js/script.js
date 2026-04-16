@@ -250,6 +250,9 @@ function openModal(commandName) {
     const data = commandData[commandName];
     if (!data) return;
 
+    const modal = document.getElementById('commandModal');
+    if (!modal) return;
+    
     document.getElementById('modalCommandName').textContent = commandName;
     
     const aliasesEl = document.getElementById('modalAliases');
@@ -289,21 +292,27 @@ function openModal(commandName) {
         noteSection.style.display = 'none';
     }
 
-    document.getElementById('commandModal').classList.add('active');
+    modal.classList.add('active');
     document.body.style.overflow = 'hidden';
 }
 
 function closeModal() {
-    document.getElementById('commandModal').classList.remove('active');
-    document.body.style.overflow = 'auto';
+    const modal = document.getElementById('commandModal');
+    if (modal) {
+        modal.classList.remove('active');
+        document.body.style.overflow = 'auto';
+    }
 }
 
 // Close modal on outside click
-document.getElementById('commandModal').addEventListener('click', function(e) {
-    if (e.target === this) {
-        closeModal();
-    }
-});
+const modal = document.getElementById('commandModal');
+if (modal) {
+    modal.addEventListener('click', function(e) {
+        if (e.target === this) {
+            closeModal();
+        }
+    });
+}
 
 // Close modal on escape key
 document.addEventListener('keydown', function(e) {
@@ -357,21 +366,30 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     // Scroll indicator click handler
-    document.getElementById('scrollIndicator').addEventListener('click', () => {
-        document.getElementById('features').scrollIntoView({
-            behavior: 'smooth',
-            block: 'start'
+    const scrollIndicator = document.getElementById('scrollIndicator');
+    if (scrollIndicator) {
+        scrollIndicator.addEventListener('click', () => {
+            const features = document.getElementById('features');
+            if (features) {
+                features.scrollIntoView({
+                    behavior: 'smooth',
+                    block: 'start'
+                });
+            }
         });
-    });
+    }
 });
 
 // Dynamic invite link generation
-document.getElementById('invite-btn').addEventListener('click', function(e) {
-    e.preventDefault();
-    const permissions = '7610260541407217';
-    const inviteUrl = `https://discord.com/oauth2/authorize?client_id=828380019406929962&permissions=${permissions}&integration_type=0&scope=bot+applications.commands`;
-    window.open(inviteUrl, '_blank');
-});
+const inviteBtn = document.getElementById('invite-btn');
+if (inviteBtn) {
+    inviteBtn.addEventListener('click', function(e) {
+        e.preventDefault();
+        const permissions = '7610260541407217';
+        const inviteUrl = `https://discord.com/oauth2/authorize?client_id=828380019406929962&permissions=${permissions}&integration_type=0&scope=bot+applications.commands`;
+        window.open(inviteUrl, '_blank');
+    });
+}
 
 // Smooth scroll
 document.querySelectorAll('a[href^="#"]').forEach(anchor => {

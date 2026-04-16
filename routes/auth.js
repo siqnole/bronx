@@ -2,6 +2,7 @@
 const express = require('express');
 const axios = require('axios');
 const router = express.Router();
+const { cache } = require('../cache');
 
 const DISCORD_API_BASE = 'https://discord.com/api/v10';
 const DISCORD_CLIENT_ID = process.env.DISCORD_CLIENT_ID;
@@ -116,18 +117,44 @@ async function getDiscordGuilds(accessToken) {
 }
 
 async function getBotGuilds() {
+    const CACHE_KEY = 'bronxbot:bot:guilds:list';
+    
+    // Attempt to get from cache first
+    try {
+        const cached = await cache.get(CACHE_KEY);
+        if (cached) {
+            console.log('📦 Bot guilds fetched from global cache');
+            return cached;
+        }
+    } catch (err) {
+        console.warn('⚠️  Cache read failed for bot guilds:', err.message);
+    }
+
     try {
         if (!process.env.DISCORD_TOKEN || process.env.DISCORD_TOKEN === 'your_actual_bot_token_here') {
             console.warn('⚠️  Bot token not configured. Users will have access to 0 servers.');
             return [];
         }
+        
+        console.log('🌐 Fetching bot guilds from Discord API...');
         const botGuilds = await retryWithExponentialBackoff(
             () => axios.get(`${DISCORD_API_BASE}/users/@me/guilds`, {
                 headers: { Authorization: `Bot ${process.env.DISCORD_TOKEN}` },
                 timeout: 10000  // 10 second timeout per request
             })
         );
-        return botGuilds.data;
+        
+        const guildsData = botGuilds.data;
+        
+        // Cache the result for 10 minutes
+        try {
+            await cache.set(CACHE_KEY, guildsData, 600);
+            console.log('✅ Bot guilds list cached (TTL: 600s)');
+        } catch (err) {
+            console.warn('⚠️  Failed to cache bot guilds list:', err.message);
+        }
+        
+        return guildsData;
     } catch (error) {
         console.error('❌ Error fetching bot guilds after retries:', error.response?.data || error.message);
         console.warn('⚠️  Bot token may be invalid or rate limited. Users will have access to 0 servers.');
@@ -233,11 +260,11 @@ router.get('/callback', async (req, res) => {
                 throw new Error('Failed to get user information');
             }
             
-            // Get user's guilds
-            const userGuilds = await getDiscordGuilds(access_token);
+            // Get bot's guilds (using cache)
+            const botGuilds = await getBotGuilds();
+            const botGuildIds = new Set(botGuilds.map(g => g.id));
             
             // Include guilds where user has management permissions
-            // Fetch bot guilds asynchronously (don't block callback response)
             const accessibleGuilds = userGuilds.filter(guild => {
                 const perms = getUserPermissions(guild);
                 return perms.isOwner || perms.canManage || perms.canAdmin;
@@ -246,26 +273,8 @@ router.get('/callback', async (req, res) => {
                 name: guild.name,
                 icon: guild.icon,
                 permissions: getUserPermissions(guild),
-                botPresent: false  // Default to false, will update asynchronously
+                botPresent: botGuildIds.has(guild.id)
             }));
-            
-            // Fetch bot guilds asynchronously (non-blocking)
-            // This prevents timeout on production if bot token is slow
-            getBotGuilds().then(botGuilds => {
-                const botGuildIds = new Set(botGuilds.map(g => g.id));
-                // Update bot presence in session guilds
-                for (const guild of accessibleGuilds) {
-                    guild.botPresent = botGuildIds.has(guild.id);
-                }
-                // Store updated guilds back to session
-                if (req.session) {
-                    req.session.accessibleGuilds = accessibleGuilds;
-                }
-                console.log(`✓ Bot guilds updated for user ${user.id}`);
-            }).catch(err => {
-                console.warn(`⚠️  Failed to fetch bot guilds asynchronously for user ${user.id}: ${err.message}`);
-                // User can still log in even if we can't fetch bot guild list
-            });
             
             // Store in session
             req.session.user = {
