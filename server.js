@@ -11,6 +11,7 @@ const cors = require('cors');
 require('dotenv').config();
 
 // Custom modules (pre-existing)
+const { honeypotMiddleware } = require('./honeypot');
 const { cache } = require('./cache');
 const { rateLimiters } = require('./rateLimit');
 const {
@@ -45,6 +46,7 @@ const { initSocket, initializeRealTimeMonitoring, registerRoutes: registerRealti
 // ── App & server setup ──────────────────────────────────────────────────
 
 const app = express();
+app.use(honeypotMiddleware);
 const server = http.createServer(app);
 const io = socketIo(server, {
     cors: {
