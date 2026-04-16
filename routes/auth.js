@@ -258,12 +258,53 @@ router.get('/callback', async (req, res) => {
             if (waitSeconds > 0) {
                 console.log(`🛡️  Circuit Breaker Tripped: Rejecting OAuth attempt for all users (Discord cooldown active for ${waitSeconds}s)`);
                 return res.status(429).send(`
-                    <div style="background: #1a1a1a; color: white; height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; font-family: sans-serif; text-align: center; padding: 20px;">
-                        <h1 style="color: #ff4757;">Authorization Cooldown</h1>
-                        <p style="font-size: 1.2rem;">Discord is currently rate-limiting login attempts for all users.</p>
-                        <p style="color: #ffa502;">System is cooling down to protect our servers. Please wait <strong>${waitSeconds} seconds</strong> and try again.</p>
-                        <button onclick="location.reload()" style="margin-top: 20px; padding: 12px 24px; background: #5865F2; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">Retry Now</button>
+                    <!DOCTYPE html>
+                    <html><head><title>Authorization Cooldown</title>
+                    <style>
+                        * { margin: 0; padding: 0; box-sizing: border-box; }
+                        body { background: #0d0d0d; color: #e0e0e0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+                               display: flex; align-items: center; justify-content: center; min-height: 100vh; text-align: center; padding: 20px; }
+                        .container { max-width: 480px; }
+                        .icon { font-size: 4rem; margin-bottom: 1rem; }
+                        h1 { color: #ff6b6b; font-size: 1.8rem; margin-bottom: 0.5rem; }
+                        .subtitle { color: #aaa; font-size: 1.1rem; margin-bottom: 1.5rem; line-height: 1.5; }
+                        .countdown { font-size: 3rem; font-weight: bold; color: #5865F2; margin: 1rem 0;
+                                     font-variant-numeric: tabular-nums; }
+                        .countdown span { color: #888; font-size: 1rem; font-weight: normal; }
+                        .retry-btn { display: inline-block; margin-top: 1.5rem; padding: 14px 32px; background: #5865F2;
+                                     color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 1rem;
+                                     font-weight: 600; text-decoration: none; transition: all 0.2s; }
+                        .retry-btn:hover { background: #4752c4; transform: translateY(-1px); }
+                        .retry-btn:disabled { background: #333; cursor: not-allowed; transform: none; }
+                        .hint { margin-top: 1rem; color: #666; font-size: 0.85rem; }
+                    </style>
+                    </head><body>
+                    <div class="container">
+                        <div class="icon">🛡️</div>
+                        <h1>Authorization Cooldown</h1>
+                        <p class="subtitle">Discord is rate-limiting login requests from our server.<br>
+                        The system is cooling down to protect service quality.</p>
+                        <div class="countdown" id="timer">${waitSeconds}<span>s</span></div>
+                        <button class="retry-btn" id="retryBtn" disabled onclick="window.location.href='/landing'">Please Wait...</button>
+                        <p class="hint">This is temporary. The countdown will enable the retry button automatically.</p>
                     </div>
+                    <script>
+                        let remaining = ${waitSeconds};
+                        const timer = document.getElementById('timer');
+                        const btn = document.getElementById('retryBtn');
+                        const interval = setInterval(() => {
+                            remaining--;
+                            timer.innerHTML = remaining + '<span>s</span>';
+                            if (remaining <= 0) {
+                                clearInterval(interval);
+                                timer.innerHTML = '0<span>s</span>';
+                                btn.disabled = false;
+                                btn.textContent = 'Retry Login';
+                                btn.style.background = '#5865F2';
+                            }
+                        }, 1000);
+                    </script>
+                    </body></html>
                 `);
             }
         }
@@ -370,10 +411,16 @@ router.get('/callback', async (req, res) => {
     
     try {
         await exchangePromise;
-        clearTimeout(timeoutId); // Clear timeout on success
-        res.redirect('/servers');
+        clearTimeout(timeoutId);
+        if (!res.headersSent) res.redirect('/servers');
     } catch (error) {
-        clearTimeout(timeoutId); // Clear timeout on error
+        clearTimeout(timeoutId);
+        
+        // Guard: if the 90s timeout already sent a response, log and bail
+        if (res.headersSent) {
+            console.warn('⚠️  Response already sent (timeout fired). Swallowing error:', error.message);
+            return;
+        }
         
         // Circuit Breaker bail-out: show cooldown page immediately
         if (error.isCircuitBreaker) {
@@ -407,7 +454,7 @@ router.get('/callback', async (req, res) => {
                     <p class="subtitle">Discord is rate-limiting login requests from our server.<br>
                     The system is cooling down to protect service quality.</p>
                     <div class="countdown" id="timer">${waitSec}<span>s</span></div>
-                    <button class="retry-btn" id="retryBtn" disabled onclick="window.location.href='/auth/login'">Please Wait...</button>
+                    <button class="retry-btn" id="retryBtn" disabled onclick="window.location.href='/landing'">Please Wait...</button>
                     <p class="hint">This is temporary. The countdown will enable the retry button automatically.</p>
                 </div>
                 <script>
