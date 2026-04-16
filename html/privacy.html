@@ -3,31 +3,50 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>bronx · privacy policy</title>
+    <title>Privacy Policy | bronx Discord Bot</title>
     
     <!-- Favicons -->
     <link rel="icon" type="image/png" href="/assets/avatar.png">
     <link rel="apple-touch-icon" href="/assets/avatar.png">
     
-    <!-- SEO -->
-    <meta name="description" content="bronx discord bot privacy policy — what data we collect, how it's stored, and your rights">
-    <meta name="keywords" content="bronx privacy, discord bot privacy policy, data collection, user rights, bronx bot data">
+    <!-- Google Analytics (gtag.js) -->
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      
+      // Default consent mode (denied until user accepts)
+      gtag('consent', 'default', {
+        'analytics_storage': 'denied'
+      });
+    </script>
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-QKVTVN4PCX"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+      gtag('config', 'G-QKVTVN4PCX');
+    </script>
+
+    <!-- SEO Meta Tags -->
+    <meta name="description" content="Learn how bronx Discord bot handles your data. We prioritize transparency and user privacy, explaining exactly what we collect and your rights to opt-out.">
+    <meta name="keywords" content="bronx privacy policy, discord bot data privacy, bot data collection, bronx bot security, user data rights">
     <meta name="author" content="bronx">
     <meta name="robots" content="index, follow">
+    <link rel="canonical" href="https://bronxbot.xyz/privacy">
     
     <!-- Open Graph Meta Tags -->
-    <meta property="og:title" content="bronx · privacy policy">
-    <meta property="og:description" content="privacy policy for the bronx discord bot">
+    <meta property="og:title" content="Privacy Policy | bronx Discord Bot">
+    <meta property="og:description" content="Transparent data practices and privacy commitment for bronx bot users.">
     <meta property="og:type" content="website">
     <meta property="og:url" content="https://bronxbot.xyz/privacy">
-    <meta property="og:image" content="https://bronxbot.xyz/avatar.png">
+    <meta property="og:image" content="https://bronxbot.xyz/assets/avatar.png">
     <meta property="og:site_name" content="bronx">
     
     <!-- Twitter Card Meta Tags -->
     <meta name="twitter:card" content="summary">
-    <meta name="twitter:title" content="bronx · privacy policy">
-    <meta name="twitter:description" content="privacy policy for the bronx discord bot">
-    <meta name="twitter:image" content="https://bronxbot.xyz/avatar.png">
+    <meta name="twitter:title" content="Privacy Policy | bronx Discord Bot">
+    <meta name="twitter:description" content="How we protect your data while you use bronx.">
+    <meta name="twitter:image" content="https://bronxbot.xyz/assets/avatar.png">
     
     <!-- Theme Color -->
     <meta name="theme-color" content="#b4a7d6">
@@ -679,5 +698,18 @@
         });
     })();
     </script>
+    <!-- Privacy Consent Banner -->
+    <div id="consent-banner" class="consent-banner">
+        <div class="consent-content">
+            <h3>Privacy Choices</h3>
+            <p>We use cookies to improve your experience and analyze our traffic. Let us know if you're okay with this!</p>
+        </div>
+        <div class="consent-buttons">
+            <button id="consent-okay" class="btn btn-primary">Okay</button>
+            <button id="consent-no" class="btn btn-secondary">No, thanks</button>
+        </div>
+    </div>
+
+    <script src="/js/consent.js"></script>
 </body>
 </html>

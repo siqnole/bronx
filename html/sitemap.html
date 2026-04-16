@@ -3,31 +3,50 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>bronx · sitemap</title>
+    <title>Sitemap | bronx Discord Bot</title>
     
     <!-- Favicons -->
     <link rel="icon" type="image/png" href="/assets/avatar.png">
     <link rel="apple-touch-icon" href="/assets/avatar.png">
     
+    <!-- Google Analytics (gtag.js) -->
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      
+      // Default consent mode (denied until user accepts)
+      gtag('consent', 'default', {
+        'analytics_storage': 'denied'
+      });
+    </script>
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-QKVTVN4PCX"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+      gtag('config', 'G-QKVTVN4PCX');
+    </script>
+
     <!-- SEO Meta Tags -->
-    <meta name="description" content="bronx sitemap — a complete directory of all pages and resources on the bronx discord bot website">
-    <meta name="keywords" content="bronx sitemap, discord bot sitemap, bronx pages, site directory, bronx bot links">
+    <meta name="description" content="Explore everything bronx Discord bot has to offer. Our sitemap provides a clear directory for commands, guides, and server management tools.">
+    <meta name="keywords" content="bronx sitemap, discord bot directory, bot feature guide, bronx bot links, discord bot pages">
     <meta name="author" content="bronx">
     <meta name="robots" content="index, follow">
+    <link rel="canonical" href="https://bronxbot.xyz/sitemap">
     
     <!-- Open Graph Meta Tags -->
-    <meta property="og:title" content="bronx · sitemap">
-    <meta property="og:description" content="a complete directory of all pages on the bronx discord bot website">
+    <meta property="og:title" content="Sitemap | bronx Discord Bot">
+    <meta property="og:description" content="View all pages and resources for the bronx discord bot.">
     <meta property="og:type" content="website">
     <meta property="og:url" content="https://bronxbot.xyz/sitemap">
-    <meta property="og:image" content="https://bronxbot.xyz/avatar.png">
+    <meta property="og:image" content="https://bronxbot.xyz/assets/avatar.png">
     <meta property="og:site_name" content="bronx">
     
     <!-- Twitter Card Meta Tags -->
     <meta name="twitter:card" content="summary">
-    <meta name="twitter:title" content="bronx · sitemap">
-    <meta name="twitter:description" content="a complete directory of all pages on the bronx discord bot website">
-    <meta name="twitter:image" content="https://bronxbot.xyz/avatar.png">
+    <meta name="twitter:title" content="Sitemap | bronx Discord Bot">
+    <meta name="twitter:description" content="Complete page directory for the bronx bot.">
+    <meta name="twitter:image" content="https://bronxbot.xyz/assets/avatar.png">
     
     <!-- Theme Color -->
     <meta name="theme-color" content="#b4a7d6">
@@ -387,5 +406,18 @@
         });
     })();
     </script>
+    <!-- Privacy Consent Banner -->
+    <div id="consent-banner" class="consent-banner">
+        <div class="consent-content">
+            <h3>Privacy Choices</h3>
+            <p>We use cookies to improve your experience and analyze our traffic. Let us know if you're okay with this!</p>
+        </div>
+        <div class="consent-buttons">
+            <button id="consent-okay" class="btn btn-primary">Okay</button>
+            <button id="consent-no" class="btn btn-secondary">No, thanks</button>
+        </div>
+    </div>
+
+    <script src="/js/consent.js"></script>
 </body>
 </html>

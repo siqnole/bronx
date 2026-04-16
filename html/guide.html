@@ -3,31 +3,50 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>bronx — master guide</title>
+    <title>Master Guide | bronx Discord Bot</title>
     
     <!-- Favicons -->
     <link rel="icon" type="image/png" href="/assets/avatar.png">
     <link rel="apple-touch-icon" href="/assets/avatar.png">
     
+    <!-- Google Analytics (gtag.js) -->
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      
+      // Default consent mode (denied until user accepts)
+      gtag('consent', 'default', {
+        'analytics_storage': 'denied'
+      });
+    </script>
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-QKVTVN4PCX"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+      gtag('config', 'G-QKVTVN4PCX');
+    </script>
+
     <!-- SEO Meta Tags -->
-    <meta name="description" content="the complete bronx discord bot guide — learn every command, feature, and system from economy to fishing to leveling">
-    <meta name="keywords" content="bronx guide, discord bot guide, bot commands, economy guide, fishing guide, leveling guide, bronx tutorial">
+    <meta name="description" content="The complete guide to using bronx Discord bot. Learn how to master the economy, fishing, mining, and gambling systems with our comprehensive command reference.">
+    <meta name="keywords" content="bronx guide, discord bot tutorial, economy bot levels, fishing guide discord, mining bot commands, bronx bot help">
     <meta name="author" content="bronx">
     <meta name="robots" content="index, follow">
+    <link rel="canonical" href="https://bronxbot.xyz/guide">
     
     <!-- Open Graph Meta Tags -->
-    <meta property="og:title" content="bronx — master guide">
-    <meta property="og:description" content="the complete bronx discord bot guide — learn every command, feature, and system">
+    <meta property="og:title" content="Master Guide | bronx Discord Bot">
+    <meta property="og:description" content="Step-by-step documentation for every feature and command in the bronx bot.">
     <meta property="og:type" content="website">
     <meta property="og:url" content="https://bronxbot.xyz/guide">
-    <meta property="og:image" content="https://bronxbot.xyz/avatar.png">
+    <meta property="og:image" content="https://bronxbot.xyz/assets/avatar.png">
     <meta property="og:site_name" content="bronx">
     
     <!-- Twitter Card Meta Tags -->
     <meta name="twitter:card" content="summary">
-    <meta name="twitter:title" content="bronx — master guide">
-    <meta name="twitter:description" content="the complete bronx discord bot guide — learn every command, feature, and system">
-    <meta name="twitter:image" content="https://bronxbot.xyz/avatar.png">
+    <meta name="twitter:title" content="Master Guide | bronx Discord Bot">
+    <meta name="twitter:description" content="Everything you need to know about using bronx on your server.">
+    <meta name="twitter:image" content="https://bronxbot.xyz/assets/avatar.png">
     
     <!-- Theme Color -->
     <meta name="theme-color" content="#b4a7d6">
@@ -611,5 +630,18 @@
         // Initialize
         loadGuide();
     </script>
+    <!-- Privacy Consent Banner -->
+    <div id="consent-banner" class="consent-banner">
+        <div class="consent-content">
+            <h3>Privacy Choices</h3>
+            <p>We use cookies to improve your experience and analyze our traffic. Let us know if you're okay with this!</p>
+        </div>
+        <div class="consent-buttons">
+            <button id="consent-okay" class="btn btn-primary">Okay</button>
+            <button id="consent-no" class="btn btn-secondary">No, thanks</button>
+        </div>
+    </div>
+
+    <script src="/js/consent.js"></script>
 </body>
 </html>

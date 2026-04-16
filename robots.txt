@@ -1,0 +1,14 @@
+User-agent: *
+Allow: /
+Allow: /landing
+Allow: /guide
+Allow: /privacy
+Allow: /sitemap
+
+# Disallow sensitive dashboard and management paths
+Disallow: /dashboard
+Disallow: /owner
+Disallow: /servers
+Disallow: /api/
+
+Sitemap: https://bronxbot.xyz/sitemap.xml

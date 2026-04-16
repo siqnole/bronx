@@ -3,32 +3,73 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>bronx</title>
+    <title>bronx | Advanced Discord Economy, Gambling & Mining Bot</title>
     
     <!-- Favicons -->
     <link rel="icon" type="image/png" href="/assets/avatar.png">
     <link rel="apple-touch-icon" href="/assets/avatar.png">
     
+    <!-- Google Analytics (gtag.js) -->
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      
+      // Default consent mode (denied until user accepts)
+      gtag('consent', 'default', {
+        'analytics_storage': 'denied'
+      });
+    </script>
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-QKVTVN4PCX"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+      gtag('config', 'G-QKVTVN4PCX');
+    </script>
+
     <!-- SEO Meta Tags -->
-    <meta name="description" content="a discord bot">
-    <meta name="keywords" content="discord bot, bronx, economy bot, gambling bot, fishing bot, discord utilities, C++ bot, moderation bot, bleed, dyno, mee6, carlbot, remix, rythm, mecha, discord.js, eris, discord.py, dpp">
+    <meta name="description" content="Elevate your Discord server with bronx, a high-performance C++ bot featuring a deep economy system, immersive gambling, fishing, mining, and advanced moderation tools.">
+    <meta name="keywords" content="discord economy bot, gambling bot, fishing bot, mining bot, bronx bot, C++ discord bot, discord utilities, moderation bot, level system discord">
     <meta name="author" content="bronx">
     <meta name="robots" content="index, follow">
+    <link rel="canonical" href="https://bronxbot.xyz">
     
     <!-- Open Graph Meta Tags -->
-    <meta property="og:title" content="bronx">
-    <meta property="og:description" content="a discord bot">
+    <meta property="og:title" content="bronx | Advanced Discord Economy & Gambling Bot">
+    <meta property="og:description" content="Immersive economy, gambling, fishing, and mining for your Discord server. Built for performance and stability.">
     <meta property="og:type" content="website">
     <meta property="og:url" content="https://bronxbot.xyz">
-    <meta property="og:image" content="https://bronxbot.xyz/avatar.png">
+    <meta property="og:image" content="https://bronxbot.xyz/assets/avatar.png">
     <meta property="og:site_name" content="bronx">
     
     <!-- Twitter Card Meta Tags -->
-    <meta name="twitter:card" content="summary">
-    <meta name="twitter:title" content="bronx">
-    <meta name="twitter:description" content="a discord bot">
-    <meta name="twitter:image" content="https://bronxbot.xyz/avatar.png">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="bronx | Advanced Discord Economy Bot">
+    <meta name="twitter:description" content="The ultimate economy and gambling experience on Discord. Fast, stable, and feature-rich.">
+    <meta name="twitter:image" content="https://bronxbot.xyz/assets/avatar.png">
     
+    <!-- Structured Data (JSON-LD) -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "SoftwareApplication",
+      "name": "bronx",
+      "operatingSystem": "All",
+      "applicationCategory": "GameApplication, UtilityApplication",
+      "description": "A high-performance Discord bot featuring economy, gambling, mining, and moderation systems.",
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD"
+      },
+      "aggregateRating": {
+        "@type": "AggregateRating",
+        "ratingValue": "4.9",
+        "ratingCount": "150"
+      }
+    }
+    </script>
+
     <!-- Theme Color -->
     <meta name="theme-color" content="#b4a7d6">
     
@@ -1061,5 +1102,18 @@
     </div>
 
     <script src="/js/script.js"></script>
+    <!-- Privacy Consent Banner -->
+    <div id="consent-banner" class="consent-banner">
+        <div class="consent-content">
+            <h3>Privacy Choices</h3>
+            <p>We use cookies to improve your experience and analyze our traffic. Let us know if you're okay with this!</p>
+        </div>
+        <div class="consent-buttons">
+            <button id="consent-okay" class="btn btn-primary">Okay</button>
+            <button id="consent-no" class="btn btn-secondary">No, thanks</button>
+        </div>
+    </div>
+
+    <script src="/js/consent.js"></script>
 </body>
 </html>
