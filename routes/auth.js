@@ -9,6 +9,10 @@ const DISCORD_CLIENT_ID = process.env.DISCORD_CLIENT_ID;
 const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET;
 const PORT = process.env.PORT || 3000;
 const BOT_OWNER_ID = process.env.BOT_OWNER_ID || '';
+// Optional: proxy URL for OAuth token exchange to bypass Cloudflare IP blocks
+// Set DISCORD_OAUTH_PROXY to a Cloudflare Worker URL to route token exchanges through it
+const DISCORD_OAUTH_PROXY = process.env.DISCORD_OAUTH_PROXY || null;
+const TOKEN_EXCHANGE_URL = DISCORD_OAUTH_PROXY || `${DISCORD_API_BASE}/oauth2/token`;
 
 // ── Exponential Backoff Retry Helper ────────────────────────────────────
 // Handles transient errors like Cloudflare rate limits (1015, 429)
@@ -345,8 +349,9 @@ router.get('/callback', async (req, res) => {
         try {
             // Exchange code for access token with retry logic
             const redirectUri = getRedirectUri(req);
+            console.log(`🔑 Token exchange via: ${DISCORD_OAUTH_PROXY ? 'PROXY' : 'DIRECT'} → ${TOKEN_EXCHANGE_URL}`);
             const tokenResponse = await retryWithExponentialBackoff(
-                () => axios.post(`${DISCORD_API_BASE}/oauth2/token`, 
+                () => axios.post(TOKEN_EXCHANGE_URL, 
                     new URLSearchParams({
                         client_id: DISCORD_CLIENT_ID,
                         client_secret: DISCORD_CLIENT_SECRET,
