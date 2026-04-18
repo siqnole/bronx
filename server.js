@@ -166,7 +166,7 @@ app.use(securityLogger);
 app.use('/api/', rateLimiters.api);
 
 // Auth middleware for API routes — skip public endpoints
-const PUBLIC_API_PATHS = ['/health', '/version', '/csrf-token', '/auth/user', '/bot/log', '/bot/events', '/bot/preview', '/guide', '/privacy/status', '/proxy/avatar', '/proxy/icon', '/proxy/avatar-default'];
+const PUBLIC_API_PATHS = ['/health', '/version', '/csrf-token', '/auth/user', '/bot/log', '/bot/events', '/bot/preview', '/guide', '/privacy/status', '/proxy/avatar', '/proxy/icon', '/proxy/avatar-default', '/stats', '/leaderboard', '/economy/mode'];
 app.use('/api', (req, res, next) => {
     if (PUBLIC_API_PATHS.some(p => req.path === p || req.path.startsWith(p + '/'))) {
         return next();
@@ -198,9 +198,10 @@ app.use('/api', async (req, res, next) => {
     // ── Public Stats Bypass ─────────────────────────────────────────────
     // If it's a read-only request to a stats/leaderboard endpoint, check if public_stats is enabled
     const isStatsRequest = req.method === 'GET' && (
-        req.path.startsWith('/stats/') || 
-        req.path.startsWith('/leaderboard/') ||
-        req.path === '/guild/settings' // Allow GET settings to check public_stats flag itself
+        req.path.startsWith('/stats') || 
+        req.path.startsWith('/leaderboard') ||
+        req.path === '/guild/settings' ||
+        req.path === '/economy/mode'
     );
 
     if (isStatsRequest) {
@@ -334,7 +335,7 @@ app.use('/callback', rateLimiters.auth);
 
 app.use(authRoutes);
 app.use(guildRoutes);
-app.use(statsRoutes);
+app.use(statsRoutes.router);
 app.use(economyRoutes);
 app.use(socialRoutes);
 app.use(moderationRoutes);

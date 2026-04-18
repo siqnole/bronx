@@ -205,54 +205,43 @@ router.get('/api/stats/overview/trend', async (req, res) => {
 
         const emptyMap = () => Object.fromEntries(labels.map(l => [l, 0]));
 
-        // Messages per day
+        // Messages per day - TRY SUMMARY TABLE FIRST (Much faster)
         const msgMap = emptyMap();
+        const activeMap = emptyMap();
         try {
             const [rows] = await db.execute(
-                `SELECT DATE(created_at) as date, COUNT(*) as cnt
-                 FROM guild_message_events
-                 WHERE guild_id = ? AND event_type = 'message'
-                   AND created_at >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
-                 GROUP BY DATE(created_at)`,
+                `SELECT stat_date as date, messages_count as msg, active_users_count as active
+                 FROM guild_daily_stats
+                 WHERE guild_id = ? AND channel_id = '__guild__'
+                   AND stat_date >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
+                 ORDER BY stat_date ASC`,
                 [guildId, days]
             );
             rows.forEach(r => {
                 const key = new Date(r.date).toISOString().slice(0, 10);
-                if (key in msgMap) msgMap[key] = Number(r.cnt);
+                if (key in msgMap) {
+                    msgMap[key] = Number(r.msg || 0);
+                    activeMap[key] = Number(r.active || 0);
+                }
             });
         } catch (e) {
+            console.warn('Summary table fallback for trend:', e.message);
+            // Deep fallback to raw logs if summary table is missing/empty
             try {
                 const [rows] = await db.execute(
-                    `SELECT stat_date as date, messages_count as cnt
-                     FROM guild_daily_stats
-                     WHERE guild_id = ? AND channel_id = '__guild__'
-                       AND stat_date >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
-                     ORDER BY stat_date ASC`,
+                    `SELECT DATE(created_at) as date, COUNT(*) as cnt
+                     FROM guild_message_events
+                     WHERE guild_id = ? AND event_type = 'message'
+                       AND created_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
+                     GROUP BY DATE(created_at)`,
                     [guildId, days]
                 );
                 rows.forEach(r => {
                     const key = new Date(r.date).toISOString().slice(0, 10);
-                    if (key in msgMap) msgMap[key] = Number(r.cnt || 0);
+                    if (key in msgMap) msgMap[key] = Number(r.cnt);
                 });
             } catch (e2) { /* ignore */ }
         }
-
-        // Active users per day
-        const activeMap = emptyMap();
-        try {
-            const [rows] = await db.execute(
-                `SELECT DATE(created_at) as date, COUNT(DISTINCT user_id) as cnt
-                 FROM guild_message_events
-                 WHERE guild_id = ? AND user_id != '0'
-                   AND created_at >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
-                 GROUP BY DATE(created_at)`,
-                [guildId, days]
-            );
-            rows.forEach(r => {
-                const key = new Date(r.date).toISOString().slice(0, 10);
-                if (key in activeMap) activeMap[key] = Number(r.cnt);
-            });
-        } catch (e) { /* ignore */ }
 
         // New members per day
         const memberMap = emptyMap();
@@ -496,35 +485,42 @@ router.get('/api/stats', async (req, res) => {
             commandsRun = rows[0]?.total || 0;
         } catch (e) { console.warn('stats commands query failed:', e.message); }
 
+        // Aggregated messages and active users
         try {
             const [rows] = await db.execute(
-                `SELECT COUNT(*) as total FROM guild_message_events
-                 WHERE guild_id = ? AND event_type = 'message'
-                   AND created_at >= DATE_SUB(NOW(), INTERVAL ? DAY)`,
+                `SELECT COALESCE(SUM(messages_count), 0) as msgs, 
+                        COALESCE(AVG(active_users_count), 0) as active
+                 FROM guild_daily_stats
+                 WHERE guild_id = ? AND channel_id = '__guild__'
+                   AND stat_date >= DATE_SUB(CURDATE(), INTERVAL ? DAY)`,
                 [guildId, days]
             );
-            messagesSeen = rows[0]?.total || 0;
+            messagesSeen = Number(rows[0]?.msgs || 0);
+            activeUsers = Math.round(Number(rows[0]?.active || 0));
         } catch (e) {
+            console.warn('Stats fallback to raw logs:', e.message);
+            // Fallback for messages
             try {
                 const [rows] = await db.execute(
-                    `SELECT COALESCE(SUM(messages_count), 0) as total FROM guild_daily_stats
-                     WHERE guild_id = ? AND channel_id = '__guild__'
-                       AND stat_date >= DATE_SUB(CURDATE(), INTERVAL ? DAY)`,
+                    `SELECT COUNT(*) as total FROM guild_message_events
+                     WHERE guild_id = ? AND event_type = 'message'
+                       AND created_at >= DATE_SUB(NOW(), INTERVAL ? DAY)`,
                     [guildId, days]
                 );
                 messagesSeen = rows[0]?.total || 0;
-            } catch (e2) { console.warn('stats messages query failed:', e2.message); }
+            } catch (e2) { /* ignore */ }
+            
+            // Fallback for active users
+            try {
+                const [rows] = await db.execute(
+                    `SELECT COUNT(DISTINCT user_id) as total FROM guild_message_events
+                     WHERE guild_id = ? AND user_id != '0'
+                       AND created_at >= DATE_SUB(NOW(), INTERVAL ? DAY)`,
+                    [guildId, days]
+                );
+                activeUsers = rows[0]?.total || 0;
+            } catch (e3) { /* ignore */ }
         }
-
-        try {
-            const [rows] = await db.execute(
-                `SELECT COUNT(DISTINCT user_id) as total FROM guild_message_events
-                 WHERE guild_id = ? AND user_id != '0'
-                   AND created_at >= DATE_SUB(NOW(), INTERVAL ? DAY)`,
-                [guildId, days]
-            );
-            activeUsers = rows[0]?.total || 0;
-        } catch (e) { console.warn('stats active users query failed:', e.message); }
 
         try {
             const [rows] = await db.execute(
@@ -1786,4 +1782,69 @@ router.get('/api/stats/query', async (req, res) => {
     }
 });
 
-module.exports = router;
+/**
+ * Calculate guild metrics (rating and activity trend)
+ * Based on message volume from pre-aggregated guild_daily_stats
+ */
+async function getGuildActivityMetrics(guildId) {
+    const db = getDb();
+    const cacheKey = `stats:metrics:${guildId}`;
+    const cached = await cache.get(cacheKey);
+    if (cached) return cached;
+
+    try {
+        // Query last 7 days of message volume for Rating
+        const [rows] = await db.execute(`
+            SELECT messages_count, stat_date
+            FROM guild_daily_stats
+            WHERE guild_id = ? AND channel_id = '__guild__'
+            ORDER BY stat_date DESC
+            LIMIT 7
+        `, [guildId]);
+
+        if (rows.length === 0) {
+            return { rating: 0, trend: 'stable', trendPct: 0 };
+        }
+
+        // Rating = sum of messages last 7 days
+        const totalMessages7d = rows.reduce((sum, r) => sum + (r.messages_count || 0), 0);
+
+        // Trend = compare yesterday vs the day before
+        // Since stats are only rolled up for completed days, row[0] is likely yesterday
+        const yesterdayCount = rows[0]?.messages_count || 0;
+        const dayBeforeCount = rows[1]?.messages_count || 0;
+
+        let trendPct = 0;
+        if (dayBeforeCount > 0) {
+            trendPct = ((yesterdayCount - dayBeforeCount) / dayBeforeCount) * 100;
+        } else if (yesterdayCount > 0) {
+            trendPct = 100; // From 0 to something is 100% gain
+        }
+
+        let trend = 'stable';
+        let trendIcon = 'fa-minus';
+        if (trendPct > 50) { trend = 'hot'; trendIcon = 'fa-angles-up'; }
+        else if (trendPct > 10) { trend = 'growing'; trendIcon = 'fa-arrow-up'; }
+        else if (trendPct < -50) { trend = 'cold'; trendIcon = 'fa-angles-down'; }
+        else if (trendPct < -10) { trend = 'dropping'; trendIcon = 'fa-arrow-down'; }
+
+        const metrics = {
+            rating: totalMessages7d,
+            trend,
+            trendIcon,
+            trendPct: Math.round(trendPct)
+        };
+
+        // Cache for 1 hour
+        await cache.set(cacheKey, metrics, 3600);
+        return metrics;
+    } catch (error) {
+        console.error(`Failed to calculate metrics for ${guildId}:`, error.message);
+        return { rating: 0, trend: 'stable', trendIcon: 'fa-minus', trendPct: 0 };
+    }
+}
+
+module.exports = {
+    router,
+    getGuildActivityMetrics
+};

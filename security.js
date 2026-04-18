@@ -115,7 +115,7 @@ function requireAuth(req, res, next) {
  * Uses session.accessibleGuilds (set during OAuth callback)
  */
 async function requireGuildAccess(req, res, next) {
-    const guildId = req.headers['x-guild-id'] || req.params.guildId || req.query.guildId || req.body?.guildId;
+    const guildId = req.headers['x-guild-id'] || req.params.guildId || req.query.guildId || req.query.server || req.body?.guildId;
     
     if (!guildId || guildId === 'global' || guildId === 'null' || guildId === 'undefined') {
         return res.status(400).json({ error: 'Guild ID required' });

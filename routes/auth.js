@@ -3,6 +3,7 @@ const express = require('express');
 const axios = require('axios');
 const router = express.Router();
 const { cache } = require('../cache');
+const { getGuildActivityMetrics } = require('./stats');
 
 const DISCORD_CLIENT_ID = process.env.DISCORD_CLIENT_ID;
 const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET;
@@ -394,15 +395,28 @@ router.get('/callback', async (req, res) => {
             const botGuildIds = new Set(botGuilds.map(g => g.id));
             
             // Include guilds where user has management permissions
-            const accessibleGuilds = userGuilds.filter(guild => {
+            const accessibleGuilds = await Promise.all(userGuilds.filter(guild => {
                 const perms = getUserPermissions(guild);
                 return perms.isOwner || perms.canManage || perms.canAdmin;
-            }).map(guild => ({
-                id: guild.id,
-                name: guild.name,
-                icon: guild.icon,
-                permissions: getUserPermissions(guild),
-                botPresent: botGuildIds.has(guild.id)
+            }).map(async (guild) => {
+                const botPresent = botGuildIds.has(guild.id);
+                let metrics = { rating: 0, trend: 'stable', trendIcon: 'fa-minus', trendPct: 0 };
+                
+                if (botPresent) {
+                    metrics = await getGuildActivityMetrics(guild.id);
+                }
+
+                return {
+                    id: guild.id,
+                    name: guild.name,
+                    icon: guild.icon,
+                    permissions: getUserPermissions(guild),
+                    botPresent,
+                    rating: metrics.rating,
+                    trend: metrics.trend,
+                    trendIcon: metrics.trendIcon,
+                    trendPct: metrics.trendPct
+                };
             }));
             
             // Store in session

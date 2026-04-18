@@ -7,6 +7,7 @@ const { getDb } = require('../db');
 const { cache, CacheTTL } = require('../cache');
 const { requireGuildAccess, isValidSnowflake } = require('../security');
 const { logActivity, formatAction } = require('../activity-logger');
+const { getGuildActivityMetrics } = require('./stats');
 
 
 
@@ -891,19 +892,26 @@ router.get('/api/guilds/public', async (req, res) => {
         
         if (rows.length === 0) return res.json([]);
 
-        // We need to fetch basic info from Discord or from our own cache/db if we store it
-        // For now, let's just return the IDs. The frontend can attempt to fetch icons or use initials.
-        // Actually, we should probably return names if we have them cached.
-        
-        const publicGuilds = [];
-        for (const row of rows) {
-            const metadata = await fetchGuildMetadata(row.guild_id);
-            publicGuilds.push({
+        // Concurrent fetching of metadata and metrics
+        const publicGuilds = await Promise.all(rows.map(async (row) => {
+            const [metadata, metrics] = await Promise.all([
+                fetchGuildMetadata(row.guild_id),
+                getGuildActivityMetrics(row.guild_id)
+            ]);
+            
+            return {
                 ...metadata,
+                rating: metrics.rating,
+                trend: metrics.trend,
+                trendIcon: metrics.trendIcon,
+                trendPct: metrics.trendPct,
                 public: true,
                 botPresent: true
-            });
-        }
+            };
+        }));
+        
+        // Sort by rating (message volume) descending
+        publicGuilds.sort((a, b) => (b.rating || 0) - (a.rating || 0));
         
         res.json(publicGuilds);
     } catch (error) {

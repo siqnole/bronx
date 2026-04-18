@@ -75,6 +75,14 @@
                 const aBp = a.botPresent !== false ? 0 : 1;
                 const bBp = b.botPresent !== false ? 0 : 1;
                 if (aBp !== bBp) return aBp - bBp;
+                
+                // If bot is present in both, sort by rating/activity descending
+                if (a.botPresent !== false && b.botPresent !== false) {
+                    if ((b.rating || 0) !== (a.rating || 0)) {
+                        return (b.rating || 0) - (a.rating || 0);
+                    }
+                }
+                
                 return (a.name || '').localeCompare(b.name || '');
             });
 
@@ -139,16 +147,55 @@
             const info = document.createElement('div');
             info.className = 'server-card-info';
 
+            const nameContainer = document.createElement('div');
+            nameContainer.className = 'server-card-name-row';
+            nameContainer.style.display = 'flex';
+            nameContainer.style.alignItems = 'center';
+            nameContainer.style.gap = '0.5rem';
+
             const name = document.createElement('span');
             name.className = 'server-card-name';
             name.textContent = guild.name;
+            nameContainer.appendChild(name);
+
+            // Activity Trend Indicator
+            if (botPresent && guild.trendIcon) {
+                const trend = document.createElement('i');
+                const color = guild.trend === 'hot' ? '#ff6b6b' : (guild.trend === 'growing' ? '#10b981' : (guild.trend === 'stable' ? '#9ca3af' : '#3b82f6'));
+                trend.className = `fas ${guild.trendIcon} activity-meter`;
+                trend.style.color = color;
+                trend.style.fontSize = '0.75rem';
+                trend.title = `${guild.trendPct}% activity change yesterday`;
+                nameContainer.appendChild(trend);
+            }
+
+            const roleRow = document.createElement('div');
+            roleRow.className = 'server-card-role-row';
+            roleRow.style.display = 'flex';
+            roleRow.style.alignItems = 'center';
+            roleRow.style.gap = '0.4rem';
 
             const role = document.createElement('span');
             role.className = 'server-card-role';
             role.textContent = getRoleBadge(guild.permissions);
+            roleRow.appendChild(role);
 
-            info.appendChild(name);
-            info.appendChild(role);
+            // Rating (Message Volume) Badge
+            if (botPresent && guild.rating > 0) {
+                const rating = document.createElement('span');
+                rating.className = 'server-card-rating';
+                rating.style.fontSize = '0.65rem';
+                rating.style.color = 'var(--fg-dim)';
+                rating.style.background = 'rgba(255,255,255,0.05)';
+                rating.style.padding = '1px 5px';
+                rating.style.borderRadius = '3px';
+                rating.innerHTML = `<i class="fas fa-comment-alt" style="font-size:0.6rem;"></i> ${formatMetric(guild.rating)}`;
+                rating.title = `${guild.rating} messages in last 7 days`;
+                roleRow.appendChild(rating);
+            }
+
+            info.appendChild(nameContainer);
+            info.appendChild(roleRow);
 
             // Showcase or Invite badge
             if (guild.isPublicShowcase) {
@@ -182,6 +229,13 @@
     }
 
     /* ── Helpers ───────────────────────────────────────────── */
+    function formatMetric(num) {
+        if (!num) return '0';
+        if (num >= 1000000) return (num / 1000000).toFixed(1) + 'm';
+        if (num >= 1000) return (num / 1000).toFixed(1) + 'k';
+        return num.toString();
+    }
+
     function getInitials(name) {
         if (!name) return '?';
         return name.split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase();

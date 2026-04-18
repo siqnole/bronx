@@ -421,12 +421,32 @@ class BronxBotDashboard {
     }
 
     applyGuestConstraints() {
-        // Hide all sidebar links except overview, stats, and leaderboards
+        // Whitelist of allowed tabs for guest users
+        const allowedTabs = [
+            'overview',
+            'statistics',
+            'leaderboards',
+            'activity',
+            'top-users',
+            'heatmap',
+            'fishing',
+            'voice-analytics',
+            'channel-analytics'
+        ];
+
+        // Hide forbidden sidebar links
         document.querySelectorAll('.sidebar-nav li[data-tab]').forEach(li => {
             const tab = li.getAttribute('data-tab');
-            if (tab !== 'overview' && tab !== 'statistics' && tab !== 'leaderboards') {
+            if (!allowedTabs.includes(tab)) {
                 li.style.display = 'none';
             }
+        });
+
+        // Hide specific sub-tabs or sections that might be redundant or sensitive
+        const forbiddenSubTabs = ['user-profiles', 'economy-analytics', 'gambling-analytics'];
+        forbiddenSubTabs.forEach(tab => {
+            const el = document.querySelector(`.sidebar-nav li[data-tab="${tab}"]`);
+            if (el) el.style.display = 'none';
         });
 
         // Hide empty categories
@@ -438,9 +458,9 @@ class BronxBotDashboard {
             }
         });
 
-        // If currently on a forbidden tab, switch to statistics
-        if (this.currentTab !== 'overview' && this.currentTab !== 'statistics' && this.currentTab !== 'leaderboards') {
-            this.switchTab('statistics');
+        // If currently on a forbidden tab, switch to overview
+        if (!allowedTabs.includes(this.currentTab)) {
+            this.switchTab('overview');
         }
 
         // Show guest notice
