@@ -8,7 +8,7 @@ const { cache, CacheTTL } = require('../cache');
 const { requireGuildAccess, isValidSnowflake } = require('../security');
 const { logActivity, formatAction } = require('../activity-logger');
 
-const { logActivity, formatAction } = require('../activity-logger');
+
 
 const DISCORD_API_BASE = 'https://discord.com/api/v10';
 
