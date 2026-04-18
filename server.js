@@ -164,7 +164,7 @@ app.use(securityLogger);
 app.use('/api/', rateLimiters.api);
 
 // Auth middleware for API routes — skip public endpoints
-const PUBLIC_API_PATHS = ['/health', '/csrf-token', '/auth/user', '/bot/log', '/bot/events', '/guide', '/privacy/status', '/proxy/avatar', '/proxy/icon', '/proxy/avatar-default'];
+const PUBLIC_API_PATHS = ['/health', '/version', '/csrf-token', '/auth/user', '/bot/log', '/bot/events', '/guide', '/privacy/status', '/proxy/avatar', '/proxy/icon', '/proxy/avatar-default'];
 app.use('/api', (req, res, next) => {
     if (PUBLIC_API_PATHS.some(p => req.path === p || req.path.startsWith(p + '/'))) {
         return next();
@@ -201,6 +201,16 @@ app.get('/api/csrf-token', getCsrfToken);
 // Guild context + API call tracking
 app.use(guildContext);
 app.use('/api', trackApiCalls);
+
+// ── Version endpoint ────────────────────────────────────────────────────
+
+const pkg = require('./package.json');
+app.get('/api/version', (req, res) => {
+    res.json({
+        status: 'ok',
+        version: pkg.version
+    });
+});
 
 // ── Page routes ─────────────────────────────────────────────────────────
 
