@@ -196,7 +196,7 @@ async function getGuildRealtimeStats(guildId) {
             }
 
             const [[joinStats]] = await db.execute(
-                'SELECT COUNT(*) as count FROM guild_member_events WHERE guild_id = ? AND event_type = "join" AND created_at >= CURDATE()',
+                "SELECT COUNT(*) as count FROM guild_member_events WHERE guild_id = ? AND event_type = 'join' AND created_at >= CURDATE()",
                 [guildId]
             );
             newMembersToday = joinStats.count || 0;
