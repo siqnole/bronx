@@ -334,7 +334,7 @@ app.get('/api/health', async (req, res) => {
 app.use('/callback', rateLimiters.auth);
 
 app.use(authRoutes);
-app.use(guildRoutes);
+app.use(guildRoutes.router);
 app.use(statsRoutes.router);
 app.use(economyRoutes);
 app.use(socialRoutes);
