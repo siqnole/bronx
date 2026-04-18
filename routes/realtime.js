@@ -2,6 +2,7 @@
 const { getDb } = require('../db');
 const state = require('../state');
 const { requireBotOwner } = require('../security');
+const { getGuildInfo } = require('../discord');
 
 let io = null;
 
@@ -185,9 +186,29 @@ async function getGuildRealtimeStats(guildId) {
             } catch (e2) { /* ignore */ }
         }
 
+        // Member count & Joins today
+        let memberCount = null;
+        let newMembersToday = 0;
+        try {
+            const guildInfo = await getGuildInfo(guildId);
+            if (guildInfo) {
+                memberCount = guildInfo.approximate_member_count || guildInfo.member_count;
+            }
+
+            const [[joinStats]] = await db.execute(
+                'SELECT COUNT(*) as count FROM guild_member_events WHERE guild_id = ? AND event_type = "join" AND created_at >= CURDATE()',
+                [guildId]
+            );
+            newMembersToday = joinStats.count || 0;
+        } catch (e) {
+            console.warn(`[realtime] Failed to fetch member stats for ${guildId}:`, e.message);
+        }
+
         return {
             guildId,
-            totalEconomyValue: economyValue,  // null if we couldn't get guild-specific data
+            memberCount,
+            newMembersToday,
+            totalEconomyValue: economyValue,
             commandsToday: commandsToday.count,
             fishCaughtToday: fishToday.count,
             timestamp: new Date()

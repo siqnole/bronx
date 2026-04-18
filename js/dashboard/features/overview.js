@@ -71,15 +71,26 @@ export const OverviewMixin = {
         const section = document.getElementById('overview-content');
         if (!section) return;
         const cards = section.querySelectorAll('.stat-card-value');
-        if (cards[0] && stats.memberCount !== undefined) {
-            cards[0].textContent = stats.memberCount != null ? Number(stats.memberCount).toLocaleString() : '—';
+
+        // Total Members
+        if (cards[0] && stats.memberCount !== undefined && stats.memberCount !== null) {
+            cards[0].textContent = Number(stats.memberCount).toLocaleString();
         }
-        // Only update economy if we have a valid value (not null)
-        if (cards[1] && stats.totalEconomyValue !== null && stats.totalEconomyValue !== undefined) {
+        
+        // Total Economy Value
+        if (cards[1] && stats.totalEconomyValue !== undefined && stats.totalEconomyValue !== null) {
             cards[1].textContent = '$' + formatNumber(parseFloat(stats.totalEconomyValue) || 0);
         }
-        if (cards[2]) cards[2].textContent = (stats.commandsToday ?? 0).toLocaleString();
-        if (cards[3]) cards[3].textContent = (stats.newMembersToday ?? 0).toLocaleString();
+
+        // Commands Today
+        if (cards[2] && stats.commandsToday !== undefined && stats.commandsToday !== null) {
+            cards[2].textContent = Number(stats.commandsToday).toLocaleString();
+        }
+
+        // New Members Today
+        if (cards[3] && stats.newMembersToday !== undefined && stats.newMembersToday !== null) {
+            cards[3].textContent = Number(stats.newMembersToday).toLocaleString();
+        }
     },
 
     // ── Activity Update ────────────────────────────────────────

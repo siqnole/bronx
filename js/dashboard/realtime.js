@@ -88,6 +88,16 @@ export const RealtimeMixin = {
                     el.textContent = String(cur + 1);
                 }
             }
+            if (this.currentTab === 'overview' && data.type === 'join') {
+                const section = document.getElementById('overview-content');
+                if (section) {
+                    const cards = section.querySelectorAll('.stat-card-value');
+                    if (cards[3]) {
+                        const cur = parseInt(cards[3].textContent.replace(/\D/g, '')) || 0;
+                        cards[3].textContent = (cur + 1).toLocaleString();
+                    }
+                }
+            }
         });
 
         this.socket.on('message-stats-update', () => {
@@ -106,6 +116,16 @@ export const RealtimeMixin = {
                 if (el) {
                     const cur = parseInt(el.textContent.replace(/\D/g, '')) || 0;
                     el.textContent = String(cur + 1);
+                }
+            }
+            if (this.currentTab === 'overview') {
+                const section = document.getElementById('overview-content');
+                if (section) {
+                    const cards = section.querySelectorAll('.stat-card-value');
+                    if (cards[2]) {
+                        const cur = parseInt(cards[2].textContent.replace(/\D/g, '')) || 0;
+                        cards[2].textContent = (cur + 1).toLocaleString();
+                    }
                 }
             }
             if (this.currentTab === 'activity') {
