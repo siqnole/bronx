@@ -7,6 +7,7 @@
     /* ── State ────────────────────────────────────────────── */
     let csrfToken = null;
     let currentTab = 'overview';
+    let socket = null;
     let commandChart = null;
     let priceChart = null;
 
@@ -30,11 +31,29 @@
             showTab('overview');
             setupTabs();
             setupListeners();
+            initSocket();
             loadOverview();
         } catch (err) {
             console.error('Owner init error:', err);
             window.location.href = '/servers';
         }
+    }
+
+    function initSocket() {
+        if (typeof io === 'undefined') return;
+        socket = io();
+
+        socket.on('new-preview', (preview) => {
+            console.log('🚀 New preview notification:', preview);
+            toast(`New preview: ${preview.branch}`, 'info');
+            if (currentTab === 'deployments') {
+                loadPreviews();
+            }
+        });
+
+        socket.on('connect_error', (err) => {
+            console.warn('Socket connection error:', err.message);
+        });
     }
 
     /* ── CSRF ─────────────────────────────────────────────── */
@@ -844,51 +863,59 @@
         const list = document.getElementById('previews-list');
         if (!list) return;
 
-        list.innerHTML = `
-            <div class="loading-state">
-                <div class="spinner"></div>
-                <p>fetching active previews...</p>
-            </div>
-        `;
+        // Only show spinner if list is empty or first load
+        if (!list.children.length || list.querySelector('.loading-state')) {
+            list.innerHTML = `
+                <div class="loading-state">
+                    <div class="spinner"></div>
+                    <p>fetching active previews...</p>
+                </div>
+            `;
+        }
 
         try {
             const data = await fetchJSON('/api/render/previews');
             if (!data || !data.length) {
-                list.innerHTML = '<p class="text-muted">no active previews found</p>';
+                list.innerHTML = '<p class="text-muted" style="text-align:center;padding:2rem;">no active previews found</p>';
                 return;
             }
 
-            list.innerHTML = data.map(p => `
-                <div class="item-row ${p.status === 'inactive' ? 'opacity-50' : ''}">
-                    <div style="flex: 1;">
-                        <div style="display:flex;align-items:center;gap:0.5rem;">
-                            <span class="badge ${p.status === 'active' ? 'badge-success' : 'badge-secondary'}">${p.status}</span>
-                            <strong style="font-size:0.85rem;">${esc(p.branch)}</strong>
-                            <code style="font-size:0.7rem;opacity:0.6;">${p.commit_sha.substring(0, 7)}</code>
+            list.innerHTML = data.map(p => {
+                const isNew = (Date.now() - new Date(p.created_at).getTime()) < 60000; // 1 minute
+                return `
+                    <div class="item-row ${p.status === 'inactive' ? 'opacity-50' : ''}" style="${isNew ? 'border-left: 3px solid var(--accent);' : ''}">
+                        <div style="flex: 1;">
+                            <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">
+                                <span class="badge ${p.status === 'active' ? 'badge-success' : 'badge-secondary'}">${p.status}</span>
+                                <strong style="font-size:0.85rem;color:var(--text-bright);">${esc(p.branch)}</strong>
+                                <code style="font-size:0.7rem;opacity:0.6;background:rgba(255,255,255,0.05);padding:0.1rem 0.3rem;border-radius:3px;">${p.commit_sha.substring(0, 7)}</code>
+                                ${isNew ? '<span class="badge badge-accent" style="font-size:0.6rem;padding:0.1rem 0.3rem;">NEW</span>' : ''}
+                            </div>
+                            <div class="text-muted" style="font-size:0.72rem;margin-top:0.25rem;">
+                                created ${timeAgo(p.created_at)}
+                            </div>
                         </div>
-                        <div class="text-muted" style="font-size:0.72rem;margin-top:0.25rem;">
-                            created ${timeAgo(p.created_at)}
+                        <div style="display:flex;gap:0.5rem;align-items:center;">
+                            <a href="${p.preview_url}" target="_blank" class="btn btn-outline btn-xs" title="View Preview Site">
+                                <i class="fas fa-external-link-alt"></i>
+                            </a>
+                            <a href="${p.dashboard_url}" target="_blank" class="btn btn-ghost btn-xs" title="View Render Dashboard">
+                                <i class="fab fa-github"></i>
+                            </a>
+                            ${p.status === 'active' ? `
+                                <button class="btn btn-danger btn-xs deactivate-preview" data-id="${p.id}" title="Deactivate record">
+                                    <i class="fas fa-times"></i>
+                                </button>
+                            ` : ''}
                         </div>
                     </div>
-                    <div style="display:flex;gap:0.5rem;">
-                        <a href="${p.preview_url}" target="_blank" class="btn btn-outline btn-xs" title="View Preview Site">
-                            <i class="fas fa-external-link-alt"></i>
-                        </a>
-                        <a href="${p.dashboard_url}" target="_blank" class="btn btn-ghost btn-xs" title="View Render Dashboard">
-                            <i class="fab fa-github"></i>
-                        </a>
-                        ${p.status === 'active' ? `
-                            <button class="btn btn-danger btn-xs deactivate-preview" data-id="${p.id}" title="Deactivate">
-                                <i class="fas fa-times"></i>
-                            </button>
-                        ` : ''}
-                    </div>
-                </div>
-            `).join('');
+                `;
+            }).join('');
 
             list.querySelectorAll('.deactivate-preview').forEach(btn => {
-                btn.addEventListener('click', async () => {
-                    if (!confirm('Deactivate this preview record?')) return;
+                btn.onclick = async (e) => {
+                    e.preventDefault();
+                    if (!confirm('Deactivate this preview record? This does not stop the Render service, only hides it from this list.')) return;
                     try {
                         await postJSON(`/api/render/previews/${btn.dataset.id}/deactivate`);
                         toast('preview deactivated', 'success');
@@ -896,11 +923,11 @@
                     } catch {
                         toast('failed to deactivate preview', 'error');
                     }
-                });
+                };
             });
         } catch (err) {
             console.error('Previews load error:', err);
-            list.innerHTML = '<p class="text-muted">failed to load previews</p>';
+            list.innerHTML = '<p class="text-error" style="text-align:center;padding:2rem;">failed to load previews</p>';
         }
     }
 

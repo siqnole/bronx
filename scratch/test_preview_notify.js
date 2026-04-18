@@ -9,7 +9,7 @@ async function testFetchSettings() {
             dashboard_url: 'https://dashboard.render.com/web/srv-test/previews'
         }, {
             headers: {
-                'X-API-Key': 'sadjnsdafh4fh2h74237fh',
+                'X-API-Key': 'VY5QYz1s%r1hcqDvX7%^',
                 'Content-Type': 'application/json'
             }
         });
