@@ -50,7 +50,28 @@
             }
 
             // Build server list — bot-present first, then alphabetical
-            allGuilds = (data.guilds || []).slice().sort((a, b) => {
+            allGuilds = (data.guilds || []).slice();
+            
+            // Fetch public guilds for discovery
+            try {
+                const pubRes = await fetch('/api/guilds/public');
+                const publicGuilds = await pubRes.json();
+                
+                // Merge public guilds that user isn't already a member of or doesn't have access to
+                publicGuilds.forEach(pub => {
+                    if (!allGuilds.find(g => g.id === pub.id)) {
+                        allGuilds.push({
+                            ...pub,
+                            botPresent: true, // Always true for public stats listing
+                            isPublicShowcase: true
+                        });
+                    }
+                });
+            } catch (e) {
+                console.warn('Failed to fetch public guilds:', e);
+            }
+
+            allGuilds.sort((a, b) => {
                 const aBp = a.botPresent !== false ? 0 : 1;
                 const bBp = b.botPresent !== false ? 0 : 1;
                 if (aBp !== bBp) return aBp - bBp;
@@ -123,8 +144,17 @@
             info.appendChild(name);
             info.appendChild(role);
 
-            // Invite badge (shown when bot is not in the server)
-            if (!botPresent) {
+            // Showcase or Invite badge
+            if (guild.isPublicShowcase) {
+                const badge = document.createElement('span');
+                badge.className = 'server-card-invite-badge';
+                badge.style.background = 'var(--accent-dim)';
+                badge.style.color = 'var(--accent)';
+                badge.innerHTML = '<i class="fas fa-eye"></i> public stats';
+                card.appendChild(iconWrap);
+                card.appendChild(info);
+                card.appendChild(badge);
+            } else if (!botPresent) {
                 const badge = document.createElement('span');
                 badge.className = 'server-card-invite-badge';
                 badge.innerHTML = '<i class="fas fa-plus"></i> invite';

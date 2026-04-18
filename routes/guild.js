@@ -125,13 +125,13 @@ router.get('/api/guild/settings', async (req, res) => {
     try {
         const db = getDb();
         if (req.guildId === 'global') {
-            return res.json({ prefix: 'bb ', logging_enabled: false, logging_channel: null });
+            return res.json({ prefix: 'bb ', logging_enabled: false, logging_channel: null, public_stats: 0 });
         }
 
         const cacheKey = cache.key('guild', 'settings', req.guildId);
         const settings = await cache.getOrSet(cacheKey, async () => {
             const [rows] = await db.execute('SELECT * FROM guild_settings WHERE guild_id = ?', [req.guildId]);
-            return rows[0] || { prefix: 'bb ', logging_enabled: false, logging_channel: null };
+            return rows[0] || { prefix: 'bb ', logging_enabled: false, logging_channel: null, public_stats: 0 };
         }, CacheTTL.GUILD_SETTINGS);
 
         res.json(settings);
@@ -144,30 +144,37 @@ router.get('/api/guild/settings', async (req, res) => {
 router.put('/api/guild/settings', async (req, res) => {
     try {
         const db = getDb();
-        const { prefix, logging_enabled, logging_channel } = req.body;
+        const { prefix, logging_enabled, logging_channel, public_stats } = req.body;
 
         if (req.guildId === 'global') {
             return res.status(400).json({ error: 'Cannot modify global settings' });
         }
 
         // Get old settings for activity log
-        const [oldRows] = await db.execute('SELECT prefix FROM guild_settings WHERE guild_id = ?', [req.guildId]);
+        const [oldRows] = await db.execute('SELECT prefix, public_stats FROM guild_settings WHERE guild_id = ?', [req.guildId]);
         const oldPrefix = oldRows[0]?.prefix || 'b.';
+        const oldPublicStats = oldRows[0]?.public_stats || 0;
 
         await db.execute(`
-            INSERT INTO guild_settings (guild_id, prefix, logging_enabled, logging_channel)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO guild_settings (guild_id, prefix, logging_enabled, logging_channel, public_stats)
+            VALUES (?, ?, ?, ?, ?)
             ON DUPLICATE KEY UPDATE
-            prefix = VALUES(prefix),
-            logging_enabled = VALUES(logging_enabled),
-            logging_channel = VALUES(logging_channel)
-        `, [req.guildId, prefix, logging_enabled, logging_channel]);
+                prefix = VALUES(prefix),
+                logging_enabled = VALUES(logging_enabled),
+                logging_channel = VALUES(logging_channel),
+                public_stats = VALUES(public_stats)
+        `, [req.guildId, prefix, logging_enabled ? 1 : 0, logging_channel, public_stats ? 1 : 0]);
 
         // Log activity if prefix changed
         if (prefix && prefix !== oldPrefix) {
             await logActivity(req.guildId, req.session?.user, 'DB',
                 formatAction('prefix', 'changed', prefix, { from: oldPrefix, to: prefix }),
                 { oldValue: oldPrefix, newValue: prefix });
+        }
+        
+        if (!!public_stats !== !!oldPublicStats) {
+            await logActivity(req.guildId, req.session?.user, 'DB',
+                formatAction('transparency', public_stats ? 'enabled' : 'disabled', 'public statistics'));
         }
 
         await cache.del(cache.key('guild', 'settings', req.guildId));
@@ -834,6 +841,42 @@ router.post('/api/settings/save-all', async (req, res) => {
     } catch (error) {
         console.error('Settings save error:', error);
         res.status(500).json({ error: 'Failed to save settings' });
+    }
+});
+
+// ── Public Guilds Endpoint ──────────────────────────────────────────────
+
+router.get('/api/guilds/public', async (req, res) => {
+    try {
+        const db = getDb();
+        const [rows] = await db.execute(`
+            SELECT DISTINCT gs.guild_id
+            FROM guild_settings gs
+            WHERE gs.public_stats = 1
+            LIMIT 50
+        `);
+        
+        if (rows.length === 0) return res.json([]);
+
+        // We need to fetch basic info from Discord or from our own cache/db if we store it
+        // For now, let's just return the IDs. The frontend can attempt to fetch icons or use initials.
+        // Actually, we should probably return names if we have them cached.
+        
+        const publicGuilds = [];
+        for (const row of rows) {
+            const cached = cache.get(`guild:info:${row.guild_id}`);
+            if (cached) {
+                publicGuilds.push(cached);
+            } else {
+                // Return just ID if not cached, frontend will handle it
+                publicGuilds.push({ id: row.guild_id, name: 'Unknown Server', public: true });
+            }
+        }
+        
+        res.json(publicGuilds);
+    } catch (error) {
+        console.error('Public guilds fetch error:', error);
+        res.status(500).json({ error: 'Failed to fetch public guilds' });
     }
 });
 

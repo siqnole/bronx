@@ -125,7 +125,7 @@ router.post('/api/bot/preview', async (req, res) => {
 
     try {
         // Mark previous previews for the same branch as inactive
-        await db.execute('UPDATE site_previews SET status = "inactive" WHERE branch = ?', [branch]);
+        await db.execute('UPDATE site_previews SET status = \'inactive\' WHERE branch = ?', [branch]);
 
         // Insert new preview
         await db.execute(

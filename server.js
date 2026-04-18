@@ -166,7 +166,7 @@ app.use(securityLogger);
 app.use('/api/', rateLimiters.api);
 
 // Auth middleware for API routes — skip public endpoints
-const PUBLIC_API_PATHS = ['/health', '/version', '/csrf-token', '/auth/user', '/bot/log', '/bot/events', '/guide', '/privacy/status', '/proxy/avatar', '/proxy/icon', '/proxy/avatar-default'];
+const PUBLIC_API_PATHS = ['/health', '/version', '/csrf-token', '/auth/user', '/bot/log', '/bot/events', '/bot/preview', '/guide', '/privacy/status', '/proxy/avatar', '/proxy/icon', '/proxy/avatar-default'];
 app.use('/api', (req, res, next) => {
     if (PUBLIC_API_PATHS.some(p => req.path === p || req.path.startsWith(p + '/'))) {
         return next();
@@ -182,19 +182,46 @@ app.use('/api', (req, res, next) => {
 });
 
 // Guild access validation — check X-Guild-ID header against session
-app.use('/api', (req, res, next) => {
+app.use('/api', async (req, res, next) => {
     const guildId = req.headers['x-guild-id'];
     if (!guildId || guildId === 'null' || guildId === 'undefined' || guildId === 'global') {
         return next();
     }
+
+    // Check if user has explicit access via session
     if (req.session?.user) {
         const userGuilds = req.session.accessibleGuilds || [];
         const hasAccess = userGuilds.some(g => g.id === guildId);
-        if (!hasAccess) {
-            return res.status(403).json({ error: 'You do not have access to this server' });
+        if (hasAccess) return next();
+    }
+
+    // ── Public Stats Bypass ─────────────────────────────────────────────
+    // If it's a read-only request to a stats/leaderboard endpoint, check if public_stats is enabled
+    const isStatsRequest = req.method === 'GET' && (
+        req.path.startsWith('/stats/') || 
+        req.path.startsWith('/leaderboard/') ||
+        req.path === '/guild/settings' // Allow GET settings to check public_stats flag itself
+    );
+
+    if (isStatsRequest) {
+        try {
+            const db = getDb();
+            const cacheKey = `guild:public_stats:${guildId}`;
+            let isPublic = cache.get(cacheKey);
+            
+            if (isPublic === undefined) {
+                const [rows] = await db.execute('SELECT public_stats FROM guild_settings WHERE guild_id = ?', [guildId]);
+                isPublic = rows.length > 0 && !!rows[0].public_stats;
+                cache.set(cacheKey, isPublic, 300); // Cache for 5 mins
+            }
+            
+            if (isPublic) return next();
+        } catch (err) {
+            console.error('[Security] Public stats check failed:', err.message);
         }
     }
-    next();
+
+    return res.status(403).json({ error: 'You do not have access to this server' });
 });
 
 // CSRF token endpoint
@@ -232,16 +259,23 @@ app.get('/servers', (req, res) => {
 });
 
 app.get('/dashboard', (req, res) => {
-    // Server-side auth gate: redirect unauthenticated users to landing page
-    if (!req.session?.user) {
-        return res.redirect('/');
-    }
     // Optionally validate server access
     const serverId = req.query.server;
-    if (serverId && req.session.accessibleGuilds) {
+    
+    // Server-side auth gate: redirect unauthenticated users to landing page
+    // UNLESS they are trying to view a specific server's public stats
+    if (!req.session?.user && !serverId) {
+        return res.redirect('/');
+    }
+    
+    if (serverId && req.session?.accessibleGuilds) {
         const hasAccess = req.session.accessibleGuilds.some(g => g.id === serverId);
         if (!hasAccess) {
-            return res.redirect('/servers');
+            // Note: If they don't have auth access, the client-side will check for public_stats
+            // So we don't redirect to /servers if they are fully unauthenticated but have a server ID
+            if (req.session?.user) {
+                return res.redirect('/servers');
+            }
         }
     }
     res.sendFile(path.join(__dirname, 'html/dashboard.html'));

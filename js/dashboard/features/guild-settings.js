@@ -20,6 +20,7 @@ export const GuildSettingsMixin = {
         if (settings) {
             document.getElementById('guild-prefix').value = settings.prefix || 'bb ';
             document.getElementById('logging-enabled').checked = settings.logging_enabled || false;
+            document.getElementById('public-stats-enabled').checked = settings.public_stats || false;
         }
 
         const blockedChannels = await this.apiCall('/guild/blocked-channels');
@@ -27,6 +28,26 @@ export const GuildSettingsMixin = {
 
         const customPrefixes = await this.apiCall('/guild/custom-prefixes');
         if (customPrefixes) this.updateCustomPrefixesList(customPrefixes);
+        
+        // Add save listener for the basic settings card
+        document.getElementById('save-basic-settings')?.addEventListener('click', () => this.saveBasicSettings());
+    },
+
+    async saveBasicSettings() {
+        const prefix = document.getElementById('guild-prefix').value.trim();
+        const logging_enabled = document.getElementById('logging-enabled').checked;
+        const public_stats = document.getElementById('public-stats-enabled').checked;
+
+        const res = await this.apiCall('/guild/settings', {
+            method: 'PUT',
+            body: JSON.stringify({ prefix, logging_enabled, public_stats })
+        });
+
+        if (res) {
+            this.toast('Basic settings saved!', 'success');
+        } else {
+            this.toast('Failed to save settings', 'error');
+        }
     },
 
     // ── Blocked Channels ───────────────────────────────────────

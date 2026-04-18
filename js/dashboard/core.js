@@ -79,8 +79,20 @@ class BronxBotDashboard {
                 await this.loadUserData();
                 this.setupCharts();
             } else {
-                window.location.href = '/servers';
-                return;
+                // If not authenticated, check if visiting a public guild
+                const urlParams = new URLSearchParams(window.location.search);
+                const guildId = urlParams.get('server');
+                if (guildId) {
+                    this.selectedServerId = guildId;
+                    this.currentGuild = guildId;
+                    this.isGuest = true;
+                    // Allow them to stay and load server data
+                    await this.loadServerData();
+                    this.setupCharts();
+                } else {
+                    window.location.href = '/servers';
+                    return;
+                }
             }
         } catch (err) {
             console.error('Dashboard initialization failed:', err);
@@ -140,6 +152,10 @@ class BronxBotDashboard {
                 }
             }
             this.isAuthenticated = false;
+            // Also check if we should allow guest mode
+            const urlParams = new URLSearchParams(window.location.search);
+            if (urlParams.has('server')) return true; 
+            
             return false;
         } catch (error) {
             console.error('Authentication check failed:', error);
@@ -366,6 +382,44 @@ class BronxBotDashboard {
         this.applyEconomyModeGating();
 
         this.joinServerRoom(this.selectedServerId);
+
+        if (this.isGuest) {
+            this.applyGuestConstraints();
+        }
+    }
+
+    applyGuestConstraints() {
+        // Hide all sidebar links except overview, stats, and leaderboards
+        document.querySelectorAll('.sidebar-nav li[data-tab]').forEach(li => {
+            const tab = li.getAttribute('data-tab');
+            if (tab !== 'overview' && tab !== 'statistics' && tab !== 'leaderboards') {
+                li.style.display = 'none';
+            }
+        });
+
+        // If currently on a forbidden tab, switch to statistics
+        if (this.currentTab !== 'overview' && this.currentTab !== 'statistics' && this.currentTab !== 'leaderboards') {
+            this.switchTab('statistics');
+        }
+
+        // Show guest notice
+        const notice = document.createElement('div');
+        notice.id = 'guest-notice';
+        notice.style.cssText = `
+            background: var(--accent-dim);
+            color: var(--accent);
+            padding: 0.5rem 1rem;
+            text-align: center;
+            font-size: 0.8rem;
+            border-bottom: 1px solid var(--accent);
+            animation: fadeIn 0.5s ease;
+        `;
+        notice.innerHTML = '<i class="fas fa-eye"></i> You are viewing this server in <strong>Public Mode</strong>. Login to manage your own servers.';
+        document.querySelector('.top-bar')?.after(notice);
+        
+        // Hide save changes buttons
+        const saveAll = document.getElementById('save-all');
+        if (saveAll) saveAll.style.visibility = 'hidden';
     }
 
     // ── Utility Methods (instance) ─────────────────────────────
