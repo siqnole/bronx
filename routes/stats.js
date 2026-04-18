@@ -8,6 +8,124 @@ const { cache } = require('../cache');
 
 const DISCORD_API_BASE = 'https://discord.com/api/v10';
 
+// ── Discord API Layer (rate-limit safe) ─────────────────────────────────
+
+/**
+ * Central rate-limit tracker.
+ * If Discord returns 429, we stop ALL requests for `retry_after` seconds
+ * to avoid compounding the backoff.
+ */
+let discordRateLimitedUntil = 0;
+
+/** In-flight request deduplication map: cacheKey → Promise */
+const inflightRequests = new Map();
+
+/**
+ * Generic Discord API fetcher with:
+ *  - Per-key caching (avoids repeated calls for same data)
+ *  - In-flight deduplication (concurrent callers share one request)
+ *  - Global 429 backoff (one rate limit pauses all calls)
+ */
+async function cachedDiscordFetch(cacheKey, url, ttlSeconds = 300) {
+    // 1) If we're globally rate-limited, return null immediately
+    if (Date.now() < discordRateLimitedUntil) {
+        return null;
+    }
+
+    // 2) Check cache first
+    const cached = await cache.get(cacheKey);
+    if (cached !== null && cached !== undefined) return cached;
+
+    // 3) Token required
+    if (!process.env.DISCORD_TOKEN) return null;
+
+    // 4) Deduplicate: if someone else is already fetching this, wait for them
+    if (inflightRequests.has(cacheKey)) {
+        return inflightRequests.get(cacheKey);
+    }
+
+    // 5) Make the request
+    const promise = (async () => {
+        try {
+            const resp = await axios.get(url, {
+                headers: { Authorization: `Bot ${process.env.DISCORD_TOKEN}` },
+                timeout: 10000
+            });
+            await cache.set(cacheKey, resp.data, ttlSeconds);
+            return resp.data;
+        } catch (e) {
+            // Handle 429 globally
+            if (e.response?.status === 429) {
+                const retryAfter = (e.response.data?.retry_after || e.response.headers?.['retry-after'] || 60) * 1000;
+                discordRateLimitedUntil = Date.now() + retryAfter;
+                console.warn(`[Discord] Rate limited — backing off for ${retryAfter / 1000}s`);
+            } else {
+                console.warn(`[Discord] ${url} failed:`, e.response?.status || e.message);
+            }
+            return null;
+        } finally {
+            inflightRequests.delete(cacheKey);
+        }
+    })();
+
+    inflightRequests.set(cacheKey, promise);
+    return promise;
+}
+
+/**
+ * Get guild info (member count, etc.) — cached for 5 minutes.
+ */
+async function getGuildInfo(guildId) {
+    return cachedDiscordFetch(
+        `discord:guild_info:${guildId}`,
+        `${DISCORD_API_BASE}/guilds/${guildId}?with_counts=true`,
+        300  // 5 min
+    );
+}
+
+/**
+ * Get guild member IDs for economy scoping — cached for 10 minutes.
+ * Returns array of user ID strings, or null on failure.
+ */
+async function getGuildMemberIds(guildId) {
+    const cacheKey = `discord:member_ids:${guildId}`;
+    const cached = await cache.get(cacheKey);
+    if (cached) return cached;
+
+    if (!process.env.DISCORD_TOKEN || Date.now() < discordRateLimitedUntil) return null;
+
+    // Deduplicate
+    if (inflightRequests.has(cacheKey)) {
+        return inflightRequests.get(cacheKey);
+    }
+
+    const promise = (async () => {
+        try {
+            const resp = await axios.get(`${DISCORD_API_BASE}/guilds/${guildId}/members?limit=1000`, {
+                headers: { Authorization: `Bot ${process.env.DISCORD_TOKEN}` },
+                timeout: 10000
+            });
+            const ids = resp.data.map(m => m.user.id);
+            await cache.set(cacheKey, ids, 600);  // 10 min
+            return ids;
+        } catch (e) {
+            if (e.response?.status === 429) {
+                const retryAfter = (e.response.data?.retry_after || e.response.headers?.['retry-after'] || 60) * 1000;
+                discordRateLimitedUntil = Date.now() + retryAfter;
+                console.warn(`[Discord] Rate limited on member fetch — backing off for ${retryAfter / 1000}s`);
+            } else {
+                console.warn(`[Discord] Member fetch for ${guildId} failed:`, e.response?.status || e.message);
+            }
+            return null;
+        } finally {
+            inflightRequests.delete(cacheKey);
+        }
+    })();
+
+    inflightRequests.set(cacheKey, promise);
+    return promise;
+}
+
 // ── Utility ─────────────────────────────────────────────────────────────
 
 /**
@@ -21,28 +139,40 @@ async function resolveGuildMembers(guildId) {
     try {
         const cacheKey = `discord:members:${guildId}`;
         let members = await cache.get(cacheKey);
-        if (!members && process.env.DISCORD_TOKEN) {
+        if (!members && process.env.DISCORD_TOKEN && Date.now() >= discordRateLimitedUntil) {
             // Paginate to fetch all members (Discord limits to 1000 per request)
             members = [];
             let after = '0';
             for (let page = 0; page < 10; page++) {  // cap at 10k members
-                const resp = await axios.get(
-                    `${DISCORD_API_BASE}/guilds/${guildId}/members?limit=1000&after=${after}`, {
-                    headers: { Authorization: `Bot ${process.env.DISCORD_TOKEN}` }
-                });
-                const batch = resp.data;
-                if (!batch || batch.length === 0) break;
-                members.push(...batch.map(m => ({
-                    id: m.user.id,
-                    username: m.user.username,
-                    display_name: m.nick || m.user.global_name || m.user.username,
-                    avatar: m.user.avatar
-                })));
-                if (batch.length < 1000) break;  // last page
-                after = batch[batch.length - 1].user.id;
+                try {
+                    const resp = await axios.get(
+                        `${DISCORD_API_BASE}/guilds/${guildId}/members?limit=1000&after=${after}`, {
+                        headers: { Authorization: `Bot ${process.env.DISCORD_TOKEN}` },
+                        timeout: 10000
+                    });
+                    const batch = resp.data;
+                    if (!batch || batch.length === 0) break;
+                    members.push(...batch.map(m => ({
+                        id: m.user.id,
+                        username: m.user.username,
+                        display_name: m.nick || m.user.global_name || m.user.username,
+                        avatar: m.user.avatar
+                    })));
+                    if (batch.length < 1000) break;  // last page
+                    after = batch[batch.length - 1].user.id;
+                } catch (e) {
+                    if (e.response?.status === 429) {
+                        const retryAfter = (e.response.data?.retry_after || 60) * 1000;
+                        discordRateLimitedUntil = Date.now() + retryAfter;
+                        console.warn(`[Discord] Rate limited on member resolve — backing off for ${retryAfter / 1000}s`);
+                    }
+                    break;
+                }
             }
-            console.log(`[resolveGuildMembers] Fetched ${members.length} members for guild ${guildId}`);
-            await cache.set(cacheKey, members, 120);
+            if (members.length > 0) {
+                console.log(`[resolveGuildMembers] Fetched ${members.length} members for guild ${guildId}`);
+                await cache.set(cacheKey, members, 300);  // 5 min
+            }
         }
         if (members) {
             for (const m of members) {
@@ -71,17 +201,13 @@ async function resolveGuildChannels(guildId) {
     const channelMap = {};
     if (!guildId) return channelMap;
     try {
-        const cacheKey = `discord:channels:${guildId}`;
-        let channels = await cache.get(cacheKey);
-        if (!channels && process.env.DISCORD_TOKEN) {
-            const resp = await axios.get(`${DISCORD_API_BASE}/guilds/${guildId}/channels`, {
-                headers: { Authorization: `Bot ${process.env.DISCORD_TOKEN}` }
-            });
-            channels = resp.data;
-            await cache.set(cacheKey, channels, 300);
-        }
-        if (channels) {
-            for (const ch of channels) channelMap[ch.id] = ch.name;
+        const data = await cachedDiscordFetch(
+            `discord:channels:${guildId}`,
+            `${DISCORD_API_BASE}/guilds/${guildId}/channels`,
+            600  // 10 min
+        );
+        if (data) {
+            for (const ch of data) channelMap[ch.id] = ch.name;
         }
     } catch (e) {
         console.warn('resolveGuildChannels failed:', e.message);
@@ -158,18 +284,11 @@ router.get('/api/stats/overview', async (req, res) => {
             });
         }
 
-        // Per-guild: real member count from Discord API
+        // Per-guild: real member count from Discord API — cached via helper
         let memberCount = null;
-        if (process.env.DISCORD_TOKEN) {
-            try {
-                const guildRes = await axios.get(
-                    `${DISCORD_API_BASE}/guilds/${guildId}?with_counts=true`,
-                    { headers: { Authorization: `Bot ${process.env.DISCORD_TOKEN}` } }
-                );
-                memberCount = guildRes.data.approximate_member_count ?? guildRes.data.member_count ?? null;
-            } catch (e) {
-                console.warn('Discord guild member count fetch failed:', e.response?.data || e.message);
-            }
+        const guildInfo = await getGuildInfo(guildId);
+        if (guildInfo) {
+            memberCount = guildInfo.approximate_member_count ?? guildInfo.member_count ?? null;
         }
 
         let economyTotal = 0;
@@ -197,20 +316,8 @@ router.get('/api/stats/overview', async (req, res) => {
             }
             // If server_users returned 0 or doesn't exist, try global users table with member scoping
             if (economyTotal === 0) {
-                // Fetch guild member IDs for scoping
-                let memberIds = null;
-                try {
-                    const { cache: appCache } = require('../cache');
-                    const cacheKey = `discord:member_ids:${guildId}`;
-                    memberIds = await appCache.get(cacheKey);
-                    if (!memberIds && process.env.DISCORD_TOKEN) {
-                        const resp = await axios.get(`${DISCORD_API_BASE}/guilds/${guildId}/members?limit=1000`, {
-                            headers: { Authorization: `Bot ${process.env.DISCORD_TOKEN}` }
-                        });
-                        memberIds = resp.data.map(m => m.user.id);
-                        await appCache.set(cacheKey, memberIds, 120);
-                    }
-                } catch (e) { console.warn('member fetch for economy scoping failed:', e.message); }
+                // Fetch guild member IDs for scoping — cached via helper
+                let memberIds = await getGuildMemberIds(guildId);
 
                 if (memberIds && memberIds.length > 0) {
                     const placeholders = memberIds.map(() => '?').join(',');
@@ -918,20 +1025,8 @@ router.get('/api/stats/economy', async (req, res) => {
         // If server_users didn't exist or returned 0, try global users with member scoping
         if (totalWealth === 0) {
             try {
-                // Get guild member IDs
-                let memberIds = null;
-                try {
-                    const { cache: memberCache } = require('../cache');
-                    const cacheKey = `discord:member_ids:${guildId}`;
-                    memberIds = await memberCache.get(cacheKey);
-                    if (!memberIds && process.env.DISCORD_TOKEN) {
-                        const resp = await axios.get(`${DISCORD_API_BASE}/guilds/${guildId}/members?limit=1000`, {
-                            headers: { Authorization: `Bot ${process.env.DISCORD_TOKEN}` }
-                        });
-                        memberIds = resp.data.map(m => m.user.id);
-                        await memberCache.set(cacheKey, memberIds, 120);
-                    }
-                } catch (me) { console.warn('member fetch for economy scoping:', me.message); }
+                // Get guild member IDs — cached via helper
+                let memberIds = await getGuildMemberIds(guildId);
 
                 if (memberIds && memberIds.length > 0) {
                     const placeholders = memberIds.map(() => '?').join(',');
