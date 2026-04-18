@@ -42,6 +42,8 @@ const guideRoutes = require('./routes/guide');
 const privacyRoutes = require('./routes/privacy');
 const avatarProxyRoutes = require('./routes/avatar-proxy');
 const { initSocket, initializeRealTimeMonitoring, registerRoutes: registerRealtimeRoutes } = require('./routes/realtime');
+const renderRoutes = require('./routes/render');
+
 
 // ── App & server setup ──────────────────────────────────────────────────
 
@@ -208,9 +210,11 @@ const pkg = require('./package.json');
 app.get('/api/version', (req, res) => {
     res.json({
         status: 'ok',
-        version: pkg.version
+        version: pkg.version,
+        isPreview: process.env.IS_PULL_REQUEST === 'true' || process.env.RENDER_SERVICE_TYPE === 'web' && !!process.env.RENDER_EXTERNAL_URL?.includes('-pr-')
     });
 });
+
 
 // ── Page routes ─────────────────────────────────────────────────────────
 
@@ -308,6 +312,8 @@ app.use(botRoutes);
 app.use(guideRoutes);
 app.use(privacyRoutes);
 app.use(avatarProxyRoutes);
+app.use(renderRoutes);
+
 
 // Leaderboard routes
 const leaderboardRoutes = require('./routes/leaderboard');

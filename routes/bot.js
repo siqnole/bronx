@@ -104,9 +104,46 @@ router.post('/api/bot/events', async (req, res) => {
             console.error(`Bot event error (${type}):`, error.message);
         }
     }
+    res.json({ ok: true, count: inserted });
+});
 
-    res.json({ ok: true, inserted });
+// ── Bot Preview Endpoint ────────────────────────────────────────────────
+// Called by GitHub Actions after creating a Render service preview
+
+router.post('/api/bot/preview', async (req, res) => {
+    const apiKey = req.headers['x-api-key'];
+    if (!apiKey || apiKey !== process.env.BOT_API_KEY) {
+        return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const db = getDb();
+    const { commit_sha, branch, preview_url, dashboard_url } = req.body;
+
+    if (!commit_sha || !branch || !preview_url || !dashboard_url) {
+        return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    try {
+        // Mark previous previews for the same branch as inactive
+        await db.execute('UPDATE site_previews SET status = "inactive" WHERE branch = ?', [branch]);
+
+        // Insert new preview
+        await db.execute(
+            'INSERT INTO site_previews (commit_sha, branch, preview_url, dashboard_url) VALUES (?, ?, ?, ?)',
+            [commit_sha, branch, preview_url, dashboard_url]
+        );
+
+        if (io) {
+            io.emit('new-preview', { branch, commit_sha, preview_url });
+        }
+
+        res.json({ ok: true });
+    } catch (error) {
+        console.error('Bot preview error:', error);
+        res.status(500).json({ error: 'Failed to record preview' });
+    }
 });
 
 module.exports = router;
+
 module.exports.setIo = setIo;

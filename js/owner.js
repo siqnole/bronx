@@ -77,8 +77,10 @@
             shop: loadShopData,
             ml: loadMLSettings,
             lists: loadLists,
-            economy: loadEconomySettings
+            economy: loadEconomySettings,
+            deployments: loadPreviews
         };
+
         (loaders[tab] || (() => {}))();
     }
 
@@ -111,7 +113,11 @@
         // Economy
         on('save-economy-settings', 'click', saveEconomySettings);
         on('adjust-balance-btn', 'click', adjustGuildBalance);
+
+        // Deployments
+        on('refresh-previews', 'click', loadPreviews);
     }
+
 
     /* ============================================================
        Overview Tab
@@ -830,6 +836,74 @@
             toast('failed to adjust balance', 'error');
         }
     }
+
+    /* ============================================================
+       Deployments Tab
+       ============================================================ */
+    async function loadPreviews() {
+        const list = document.getElementById('previews-list');
+        if (!list) return;
+
+        list.innerHTML = `
+            <div class="loading-state">
+                <div class="spinner"></div>
+                <p>fetching active previews...</p>
+            </div>
+        `;
+
+        try {
+            const data = await fetchJSON('/api/render/previews');
+            if (!data || !data.length) {
+                list.innerHTML = '<p class="text-muted">no active previews found</p>';
+                return;
+            }
+
+            list.innerHTML = data.map(p => `
+                <div class="item-row ${p.status === 'inactive' ? 'opacity-50' : ''}">
+                    <div style="flex: 1;">
+                        <div style="display:flex;align-items:center;gap:0.5rem;">
+                            <span class="badge ${p.status === 'active' ? 'badge-success' : 'badge-secondary'}">${p.status}</span>
+                            <strong style="font-size:0.85rem;">${esc(p.branch)}</strong>
+                            <code style="font-size:0.7rem;opacity:0.6;">${p.commit_sha.substring(0, 7)}</code>
+                        </div>
+                        <div class="text-muted" style="font-size:0.72rem;margin-top:0.25rem;">
+                            created ${timeAgo(p.created_at)}
+                        </div>
+                    </div>
+                    <div style="display:flex;gap:0.5rem;">
+                        <a href="${p.preview_url}" target="_blank" class="btn btn-outline btn-xs" title="View Preview Site">
+                            <i class="fas fa-external-link-alt"></i>
+                        </a>
+                        <a href="${p.dashboard_url}" target="_blank" class="btn btn-ghost btn-xs" title="View Render Dashboard">
+                            <i class="fab fa-github"></i>
+                        </a>
+                        ${p.status === 'active' ? `
+                            <button class="btn btn-danger btn-xs deactivate-preview" data-id="${p.id}" title="Deactivate">
+                                <i class="fas fa-times"></i>
+                            </button>
+                        ` : ''}
+                    </div>
+                </div>
+            `).join('');
+
+            list.querySelectorAll('.deactivate-preview').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    if (!confirm('Deactivate this preview record?')) return;
+                    try {
+                        await postJSON(`/api/render/previews/${btn.dataset.id}/deactivate`);
+                        toast('preview deactivated', 'success');
+                        loadPreviews();
+                    } catch {
+                        toast('failed to deactivate preview', 'error');
+                    }
+                });
+            });
+        } catch (err) {
+            console.error('Previews load error:', err);
+            list.innerHTML = '<p class="text-muted">failed to load previews</p>';
+        }
+    }
+
 
     /* ============================================================
        Fetch Helpers

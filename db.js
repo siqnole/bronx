@@ -215,14 +215,17 @@ async function initDatabase() {
             INDEX idx_guild_used (guild_id, used_at),
             INDEX idx_user (user_id)
         )`);
-        await db.execute(`CREATE TABLE IF NOT EXISTS fish_catches (
+        await db.execute(`CREATE TABLE IF NOT EXISTS site_previews (
             id INT AUTO_INCREMENT PRIMARY KEY,
-            user_id VARCHAR(32) NOT NULL,
-            guild_id VARCHAR(32) NOT NULL DEFAULT 'global',
-            fish_name VARCHAR(64) DEFAULT NULL,
-            caught_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            INDEX idx_guild_caught (guild_id, caught_at)
+            commit_sha VARCHAR(64) NOT NULL,
+            branch VARCHAR(128) NOT NULL,
+            preview_url VARCHAR(255) NOT NULL,
+            dashboard_url VARCHAR(255) NOT NULL,
+            status ENUM('active', 'inactive') DEFAULT 'active',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            INDEX idx_branch (branch)
         )`);
+
 
         // ─── GUILD STATS TABLES (for dashboard statistics) ─────────────────
         // Track member joins/leaves
