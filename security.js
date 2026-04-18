@@ -128,7 +128,7 @@ async function requireGuildAccess(req, res, next) {
     if (!guild) {
         // Guest/Public Access Bypass
         const isPublicRoute = req.method === 'GET' && 
-            (req.path.includes('/settings') || req.path.includes('/stats') || req.path.includes('/leaderboard') || req.path.includes('/activity'));
+            (req.path.includes('/settings') || req.path.includes('/stats') || req.path.includes('/leaderboard') || req.path.includes('/activity') || req.path.includes('/economy/mode'));
 
         if (isPublicRoute) {
             const db = require('./db').getDb();

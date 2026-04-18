@@ -160,7 +160,7 @@ router.get('/api/guild/settings', async (req, res) => {
         }, CacheTTL.GUILD_SETTINGS);
 
         // Enrich with guild metadata for public/guest access
-        const metadata = await fetchGuildMetadata(req.guildId);
+        const metadata = (await fetchGuildMetadata(req.guildId)) || { name: 'Unknown Server', icon: null };
         const enrichedSettings = {
             ...settings,
             guildName: metadata.name,
